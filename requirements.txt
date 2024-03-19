@@ -11,6 +11,8 @@ opencv-python-headless
 scikit_image
 piq
 tator
+panoptes-client
+panoptes-aggregation
 ffmpeg-python
 roboflow==1.1.19
 supervision==0.19.0rc3

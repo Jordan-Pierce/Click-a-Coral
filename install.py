@@ -110,6 +110,7 @@ install_requires = [
 
     'tator',
     'panoptes-client',
+    'panoptes-aggregation',
 
     # Don't mess with these
     'roboflow==1.1.19',

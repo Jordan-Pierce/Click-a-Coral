@@ -313,7 +313,7 @@ def upload_to_zooniverse(args):
 
         # Output a dataframe to be used for later
         dataframe = pd.DataFrame(dataframe, columns=['Media ID', 'Media Name',
-                                                     'Frame', 'Frame Name',
+                                                     'Frame ID', 'Frame Name',
                                                      'Path', 'Height', 'Width'])
         if args.upload:
             # ---------------------
