@@ -10,7 +10,7 @@
 # First, create a venv for this repo
 conda create --name zooniverse python=3.8 -y 
 
-# Second, clone this repo somewhere (e.g. /Documents/GitHub/
+# Second, clone this repo somewhere (e.g. /Documents/GitHub/)
 git clone https://github.com/Jordan-Pierce/Zooniverse.git
 
 # Third, install the dependencies within venv
