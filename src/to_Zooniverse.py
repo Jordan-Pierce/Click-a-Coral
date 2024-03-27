@@ -9,7 +9,10 @@ import tator
 import panoptes_client
 
 import cv2
+import math
+import numpy as np
 import pandas as pd
+from itertools import islice
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -19,77 +22,156 @@ warnings.filterwarnings('ignore')
 # Functions
 # ------------------------------------------------------------------------------------------------------------------
 
-# TODO
-#  This should be updated and made better; although the NAV data isn't perfect, it could still be used to help
-#  find frames that are unique and diverse (the user shouldn't see frames that look identical, otherwise
-#  they might get bored.
-def filter_frames_by_navigation(nav_data, head_thresh=1.0, east_thresh=3.0, north_thresh=3.0):
+def filter_frames_by_navigation(nav_data, dist_thresh=1.5):
     """
-    :param head_thresh:
-    :param east_thresh:
-    :param north_thresh:
+    :param dist_thresh: Threshold distance in meters to consider a new point
     :param nav_data:
     :return:
     """
     frames = []
+    prev_point = None
 
-    # Loop through each of the frames' navigational attribute data,
-    # calculate the delta between the current frame and the previous
+    # Loop through each of the frames' navigational attribute data
     for fidx, frame in enumerate(nav_data):
 
-        # Skip the first frame (nothing to compare to)
+        # Get the current easting and northing
+        curr_east = float(frame.attributes['Eastings_Raw'])
+        curr_north = float(frame.attributes['Northings_Raw'])
+        curr_point = (curr_east, curr_north)
+
+        # For the first frame, add it to the list
         if fidx == 0:
             frames.append(frame.frame)
+            prev_point = curr_point
             continue
 
-        # Get the heading diff
-        curr_head = float(frame.attributes['Heading'])
-        prev_head = float(nav_data[fidx - 1].attributes['Heading'])
-        diff_head = abs(curr_head - prev_head)
+        # Calculate the distance between the current point and the previous point
+        distance = math.sqrt((curr_east - prev_point[0])**2 + (curr_north - prev_point[1])**2)
 
-        # Get the easting diff
-        curr_east = float(frame.attributes['Eastings'])
-        prev_east = float(nav_data[fidx - 1].attributes['Eastings'])
-        diff_east = abs(curr_east - prev_east)
-
-        # Get the northing diff
-        curr_north = float(frame.attributes['Northings'])
-        prev_north = float(nav_data[fidx - 1].attributes['Northings'])
-        diff_north = abs(curr_north - prev_north)
-
-        # Find frames that represent where the ROV is moving
-        if diff_head >= head_thresh or diff_east >= east_thresh or diff_north >= north_thresh:
+        # If the distance is greater than the threshold, add the current frame
+        if distance >= dist_thresh:
             frames.append(frame.frame)
+            prev_point = curr_point
 
     return frames
 
 
-# TODO
-#   This should be updated and made better; right now it only uses OpenCV to assess the
-#   blurriness of an image, however, it's not perfect and many lower quality images
-#   still make it through.
-def assess_image_quality(image_path, lower_thresh=100, higher_thresh=200):
+def assess_quality_fta(image_path):
     """
-    :param image_path:
-    :param lower_thresh:
-    :param higher_thresh:
-    :return:
+    Assess image quality using Fourier Transform Analysis (FTA).
+    Returns a quality score between 0 and 1, where higher values indicate better quality.
     """
-    # Is the image of high quality?
-    high_quality = False
-
-    # Load the image using OpenCV, make sure RGB
     image = cv2.imread(image_path)
-    # Get the sharpness score
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # Calculate the Laplacian variance as a measure of image sharpness
-    sharpness = cv2.Laplacian(image, cv2.CV_64F).var()
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    # To catch issues with video outage
-    if lower_thresh <= sharpness <= higher_thresh:
-        high_quality = True
+    # Compute the Fourier Transform
+    f = np.fft.fft2(gray)
+    fshift = np.fft.fftshift(f)
 
-    return high_quality
+    # Calculate the magnitude spectrum
+    magnitude_spectrum = 20 * np.log(np.abs(fshift))
+
+    # Compute the mean of the magnitude spectrum (excluding the DC component)
+    mean_magnitude = np.mean(magnitude_spectrum[1:, 1:])
+
+    # Normalize the score between 0 and 1
+    quality_score = mean_magnitude / 255.0
+
+    return quality_score
+
+
+def assess_quality_edges(image_path):
+    """
+    Assess image quality using Edge Detection.
+    Returns a quality score between 0 and 1, where higher values indicate better quality.
+    """
+    image = cv2.imread(image_path)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Detect edges using the Canny algorithm
+    edges = cv2.Canny(gray, 100, 200)
+
+    # Calculate the proportion of edge pixels
+    num_edge_pixels = np.sum(edges == 255)
+    total_pixels = edges.shape[0] * edges.shape[1]
+    edge_density = num_edge_pixels / total_pixels
+
+    # Normalize the edge density to get a quality score
+    quality_score = edge_density / 0.5  # Assuming a maximum edge density of 0.5
+
+    # Clip the score between 0 and 1
+    quality_score = np.clip(quality_score, 0, 1)
+
+    return quality_score
+
+
+def assess_quality_laplacian(image_path):
+    """
+    Assess image quality using the Laplacian operator.
+    Returns a quality score between 0 and 1, where higher values indicate better quality (less blurriness).
+    """
+    image = cv2.imread(image_path)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # Apply the Laplacian operator
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+
+    # Calculate the variance of the Laplacian
+    laplacian_variance = laplacian.var()
+
+    # Normalize the variance to get a quality score between 0 and 1
+    quality_score = laplacian_variance / (255**2)
+
+    return quality_score
+
+
+def chunker(iterable, chunk_size):
+    """
+    Helper function to split an iterable into chunks of fixed size
+    """
+    iterator = iter(iterable)
+    while True:
+        chunk = list(islice(iterator, chunk_size))
+        if not chunk:
+            break
+        yield chunk
+
+
+def filter_frames_by_quality(image_paths, lower_thresh=1.5, chunk_size=5):
+    """
+    :param image_paths: List of image paths
+    :param lower_thresh: Lower threshold for sharpness score
+    :param chunk_size: Number of images to group together for quality assessment
+    :return: high_quality_images
+    """
+    high_quality_images = []
+    low_quality_images = []
+
+    # Iterate over the image paths in chunks
+    for chunk in tqdm(chunker(image_paths, chunk_size)):
+        chunk_scores = []
+        for image_path in chunk:
+            # Calculate the quality score
+            score_1 = assess_quality_fta(image_path) * 0
+            score_2 = assess_quality_edges(image_path)
+            score_3 = assess_quality_laplacian(image_path) * 0
+            chunk_scores.append((image_path, score_1 + score_2 + score_3))
+
+        # Check if all images in the chunk are below the lower threshold
+        all_low_quality = all(score <= lower_thresh for _, score in chunk_scores)
+
+        if all_low_quality:
+            low_quality_images.extend([path for path, _ in chunk_scores])
+        else:
+            # Retain only the image with the highest sharpness score
+            best_image_path, _ = max(chunk_scores, key=lambda x: x[1])
+            high_quality_images.append(best_image_path)
+
+    print(f"NOTE: Removing {len(low_quality_images)} frames")
+    for low_quality_image in low_quality_images:
+        os.remove(low_quality_image)
+
+    return high_quality_images
 
 
 def download_image(api, media_id, frame, media_dir):
@@ -254,18 +336,12 @@ def upload_to_zooniverse(args):
             nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
             print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
 
-            # TODO
-            #   Filter out frames based on navigational data?
-            #   This could be used to remove multiple sequential frames where there is no movement.
-            #   Users shouldn't be shown 1000 frames that look identical: that's boring.
-            #   Navigational data might be useful to find more diverse and interesting frames
-
-            frames = filter_frames_by_navigation(nav_data)
+            frames = filter_frames_by_navigation(nav_data, dist_thresh=3.0)
             print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
 
             # Download the frames
             print(f"NOTE: Downloading {len(frames)} frames for {media_name}")
-            with ThreadPoolExecutor(max_workers=80) as executor:
+            with ThreadPoolExecutor() as executor:
                 # Submit the jobs
                 paths = [executor.submit(download_image, api, media_id, frame, media_dir) for frame in frames]
                 # Execute, store paths
@@ -274,19 +350,8 @@ def upload_to_zooniverse(args):
         except Exception as e:
             raise Exception(f"ERROR: Could not finish downloading media {media_id} from TATOR.\n{e}")
 
-        # TODO
-        #   Filter frames based on image quality?
-        #   Now that the frames have been downloaded, we could asses their quality.
-        #   Create a or multiple functions that could be used to determine if a frame
-        #   is of lower quality (i.e., blurry) and remove it
-
-        for path in paths:
-            # Check the image quality
-            if not assess_image_quality(path):
-                # Delete the file
-                os.remove(path)
-                # Remove from the list
-                paths.remove(path)
+        print(f"NOTE: Assessing {len(paths)} frame quality")
+        image_paths = filter_frames_by_quality(paths, lower_thresh=.55, chunk_size=5)
 
         # TODO
         #   What else can be done to filter out bad frames?
@@ -300,7 +365,7 @@ def upload_to_zooniverse(args):
         # Loop through all the filtered frames and store attribute information;
         # this will be used when later when  downloading annotations from
         # Zooniverse after users are done with labeling
-        for p_idx, path in enumerate(paths):
+        for p_idx, path in enumerate(image_paths):
 
             # Add to dataframe
             dataframe.append([media_id,
