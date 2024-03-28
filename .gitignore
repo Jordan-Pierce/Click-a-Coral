@@ -1,4 +1,5 @@
-Data
+*.jpg
 .idea
 Models
 *.pt
+src/__pycache__/

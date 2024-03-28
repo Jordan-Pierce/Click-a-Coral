@@ -1,4 +1,5 @@
 import os
+import glob
 import shutil
 import argparse
 from tqdm import tqdm
@@ -8,16 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 import tator
 import panoptes_client
 
-import cv2
 import math
-import numpy as np
 import pandas as pd
-from itertools import islice
 
 import warnings
 warnings.filterwarnings('ignore')
-
-from detect import infer
 
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -56,124 +52,6 @@ def filter_frames_by_navigation(nav_data, dist_thresh=1.5):
             prev_point = curr_point
 
     return frames
-
-
-def assess_quality_fta(image_path):
-    """
-    Assess image quality using Fourier Transform Analysis (FTA).
-    Returns a quality score between 0 and 1, where higher values indicate better quality.
-    """
-    image = cv2.imread(image_path)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # Compute the Fourier Transform
-    f = np.fft.fft2(gray)
-    fshift = np.fft.fftshift(f)
-
-    # Calculate the magnitude spectrum
-    magnitude_spectrum = 20 * np.log(np.abs(fshift))
-
-    # Compute the mean of the magnitude spectrum (excluding the DC component)
-    mean_magnitude = np.mean(magnitude_spectrum[1:, 1:])
-
-    # Normalize the score between 0 and 1
-    quality_score = mean_magnitude / 255.0
-
-    return quality_score
-
-
-def assess_quality_edges(image_path):
-    """
-    Assess image quality using Edge Detection.
-    Returns a quality score between 0 and 1, where higher values indicate better quality.
-    """
-    image = cv2.imread(image_path)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # Detect edges using the Canny algorithm
-    edges = cv2.Canny(gray, 100, 200)
-
-    # Calculate the proportion of edge pixels
-    num_edge_pixels = np.sum(edges == 255)
-    total_pixels = edges.shape[0] * edges.shape[1]
-    edge_density = num_edge_pixels / total_pixels
-
-    # Normalize the edge density to get a quality score
-    quality_score = edge_density / 0.5  # Assuming a maximum edge density of 0.5
-
-    # Clip the score between 0 and 1
-    quality_score = np.clip(quality_score, 0, 1)
-
-    return quality_score
-
-
-def assess_quality_laplacian(image_path):
-    """
-    Assess image quality using the Laplacian operator.
-    Returns a quality score between 0 and 1, where higher values indicate better quality (less blurriness).
-    """
-    image = cv2.imread(image_path)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # Apply the Laplacian operator
-    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-
-    # Calculate the variance of the Laplacian
-    laplacian_variance = laplacian.var()
-
-    # Normalize the variance to get a quality score between 0 and 1
-    quality_score = laplacian_variance / (255**2)
-
-    return quality_score
-
-
-def chunker(iterable, chunk_size):
-    """
-    Helper function to split an iterable into chunks of fixed size
-    """
-    iterator = iter(iterable)
-    while True:
-        chunk = list(islice(iterator, chunk_size))
-        if not chunk:
-            break
-        yield chunk
-
-
-def filter_frames_by_quality(image_paths, lower_thresh=1.5, chunk_size=5):
-    """
-    :param image_paths: List of image paths
-    :param lower_thresh: Lower threshold for sharpness score
-    :param chunk_size: Number of images to group together for quality assessment
-    :return: high_quality_images
-    """
-    high_quality_images = []
-    low_quality_images = []
-
-    # Iterate over the image paths in chunks
-    for chunk in tqdm(chunker(image_paths, chunk_size)):
-        chunk_scores = []
-        for image_path in chunk:
-            # Calculate the quality score
-            score_1 = assess_quality_fta(image_path)
-            score_2 = assess_quality_edges(image_path) * 0
-            score_3 = assess_quality_laplacian(image_path) * 0
-            chunk_scores.append((image_path, score_1 + score_2 + score_3))
-
-        # Check if all images in the chunk are below the lower threshold
-        all_low_quality = all(score <= lower_thresh for _, score in chunk_scores)
-
-        if all_low_quality:
-            low_quality_images.extend([path for path, _ in chunk_scores])
-        else:
-            # Retain only the image with the highest sharpness score
-            best_image_path, _ = max(chunk_scores, key=lambda x: x[1])
-            high_quality_images.append(best_image_path)
-
-    print(f"NOTE: Removing {len(low_quality_images)} frames")
-    for low_quality_image in low_quality_images:
-        os.remove(low_quality_image)
-
-    return high_quality_images
 
 
 def download_image(api, media_id, frame, frame_dir):
@@ -315,9 +193,9 @@ def upload_to_zooniverse(args):
     except Exception as e:
         raise Exception(f"ERROR: Could not obtain needed information from TATOR.\n{e}")
 
-    # --------------------------
+    # ---------------------------
     # Download frames from TATOR
-    # --------------------------
+    # ---------------------------
 
     # Loop through medias
     for media_id in args.media_ids:
@@ -335,7 +213,7 @@ def upload_to_zooniverse(args):
             nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
             print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
 
-            frames = filter_frames_by_navigation(nav_data, dist_thresh=1.5)
+            frames = filter_frames_by_navigation(nav_data, dist_thresh=args.dist_thresh)
             print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
 
             # Download the frames
@@ -349,16 +227,12 @@ def upload_to_zooniverse(args):
         except Exception as e:
             raise Exception(f"ERROR: Could not finish downloading media {media_id} from TATOR.\n{e}")
 
-        print(f"NOTE: Assessing {len(paths)} frames' quality")
-        image_paths = filter_frames_by_quality(paths, lower_thresh=.5, chunk_size=5)
-
-        # TODO
-        #   What else can be done to filter out bad frames?
-        #   Any machine learning techniques?
-        #   Use an existing object detection model?
-        #   Use a foundational model?
-        print(f"NOTE: Making inferences on {len(image_paths)} frames")
-        detections = infer(media_dir, conf=0.05, iou=0.75, debug=True)
+        # -------------------------------------
+        # Manual Removal of Low Quality Frames
+        # -------------------------------------
+        _ = input("NOTE: Remove low quality frames manually; press 'Enter' when finished.")
+        # Get the remaining high quality frames
+        paths = glob.glob(f"{frame_dir}/*.jpg")
 
         # Dataframe for the filtered frames
         dataframe = []
@@ -366,7 +240,7 @@ def upload_to_zooniverse(args):
         # Loop through all the filtered frames and store attribute information;
         # this will be used when later when  downloading annotations from
         # Zooniverse after users are done with labeling
-        for p_idx, path in enumerate(image_paths):
+        for p_idx, path in enumerate(paths):
 
             # Add to dataframe
             dataframe.append([media_id,
@@ -422,6 +296,10 @@ def main():
 
     parser.add_argument("--media_ids", type=int, nargs='+',
                         help="ID for desired media(s)")
+
+    parser.add_argument("--dist_thresh", type=float,
+                        default=1.5,
+                        help="The distance (m) between successive frames to sample")
 
     parser.add_argument("--upload", action='store_true',
                         help="Upload media to Zooniverse (debugging)")
