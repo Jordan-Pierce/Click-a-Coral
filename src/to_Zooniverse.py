@@ -17,6 +17,8 @@ from itertools import islice
 import warnings
 warnings.filterwarnings('ignore')
 
+from detect import infer
+
 
 # ------------------------------------------------------------------------------------------------------------------
 # Functions
@@ -152,8 +154,8 @@ def filter_frames_by_quality(image_paths, lower_thresh=1.5, chunk_size=5):
         chunk_scores = []
         for image_path in chunk:
             # Calculate the quality score
-            score_1 = assess_quality_fta(image_path) * 0
-            score_2 = assess_quality_edges(image_path)
+            score_1 = assess_quality_fta(image_path)
+            score_2 = assess_quality_edges(image_path) * 0
             score_3 = assess_quality_laplacian(image_path) * 0
             chunk_scores.append((image_path, score_1 + score_2 + score_3))
 
@@ -174,19 +176,15 @@ def filter_frames_by_quality(image_paths, lower_thresh=1.5, chunk_size=5):
     return high_quality_images
 
 
-def download_image(api, media_id, frame, media_dir):
+def download_image(api, media_id, frame, frame_dir):
     """
 
     :param api:
     :param media:
     :param frame:
-    :param media_dir:
+    :param frame_dir:
     :return:
     """
-    # Location media directory
-    frame_dir = f"{media_dir}/frames"
-    os.makedirs(frame_dir, exist_ok=True)
-
     # Location of file
     path = f"{frame_dir}/{str(frame)}.jpg"
 
@@ -329,35 +327,38 @@ def upload_to_zooniverse(args):
             media = api.get_media(media_id)
             media_name = media.name
             media_dir = f"{output_dir}/{media_id}"
-            os.makedirs(media_dir, exist_ok=True)
+            frame_dir = f"{media_dir}/frames"
+            os.makedirs(frame_dir, exist_ok=True)
             print(f"NOTE: Media ID {media_id} corresponds to {media_name}")
 
             # Get the frames that have some navigational data instead of downloading all of the frames
             nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
             print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
 
-            frames = filter_frames_by_navigation(nav_data, dist_thresh=3.0)
+            frames = filter_frames_by_navigation(nav_data, dist_thresh=1.5)
             print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
 
             # Download the frames
             print(f"NOTE: Downloading {len(frames)} frames for {media_name}")
             with ThreadPoolExecutor() as executor:
                 # Submit the jobs
-                paths = [executor.submit(download_image, api, media_id, frame, media_dir) for frame in frames]
+                paths = [executor.submit(download_image, api, media_id, frame, frame_dir) for frame in frames]
                 # Execute, store paths
                 paths = [future.result() for future in tqdm(paths)]
 
         except Exception as e:
             raise Exception(f"ERROR: Could not finish downloading media {media_id} from TATOR.\n{e}")
 
-        print(f"NOTE: Assessing {len(paths)} frame quality")
-        image_paths = filter_frames_by_quality(paths, lower_thresh=.55, chunk_size=5)
+        print(f"NOTE: Assessing {len(paths)} frames' quality")
+        image_paths = filter_frames_by_quality(paths, lower_thresh=.5, chunk_size=5)
 
         # TODO
         #   What else can be done to filter out bad frames?
         #   Any machine learning techniques?
         #   Use an existing object detection model?
         #   Use a foundational model?
+        print(f"NOTE: Making inferences on {len(image_paths)} frames")
+        detections = infer(media_dir, conf=0.05, iou=0.75, debug=True)
 
         # Dataframe for the filtered frames
         dataframe = []

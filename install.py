@@ -102,23 +102,17 @@ install_requires = [
     'scipy',
     'scikit_learn',
     'matplotlib',
-    'Pillow',
     'opencv_python',
     'opencv-contrib-python',
     'scikit_image',
-    'piq',
 
     'tator',
     'panoptes-client',
     'panoptes-aggregation',
 
     # Don't mess with these
-    'roboflow==1.1.19',
-    'supervision==0.19.0rc3',
-    'autodistill==0.1.26',
-    'autodistill-grounded-sam==0.1.2',
-    'autodistill_grounding_dino==0.1.3',
-    'autodistill-yolov8==0.1.4',
+    'roboflow',
+    'supervision',
 ]
 
 # Installing all the other packages
