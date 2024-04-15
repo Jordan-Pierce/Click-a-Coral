@@ -74,7 +74,7 @@ def download_image(api, media_id, frame, frame_dir):
     return path
 
 
-def upload(client, project, media, dataframe):
+def upload(client, project, media, dataframe, set_active):
     """
 
     :param client:
@@ -125,24 +125,26 @@ def upload(client, project, media, dataframe):
     except Exception as e:
         raise Exception(f"ERROR: Could not finish uploading subject set for {media.id} to Zooniverse.\n{e}")
 
-    try:
-        # Attaching the new subject set to all the active workflows
-        workflow_ids = project.__dict__['raw']['links']['active_workflows']
+    if set_active:
 
-        # If there are active workflows, link them to the next subject sets
-        for workflow_id in tqdm(workflow_ids):
-            # Create Workflow object
-            workflow = client.Workflow(workflow_id)
-            workflow_name = workflow.__dict__['raw']['display_name']
-            # Add the subject set created previously
-            print(f"\nNOTE: Adding subject set {subject_set.display_name} to workflow {workflow_name}")
-            workflow.add_subject_sets([subject_set])
-            # Save
-            workflow.save()
-            project.save()
+        try:
+            # Attaching the new subject set to all the active workflows
+            workflow_ids = project.__dict__['raw']['links']['active_workflows']
 
-    except Exception as e:
-        raise Exception(f"ERROR: Could not link media {media.id} to project workflows.\n{e}")
+            # If there are active workflows, link them to the next subject sets
+            for workflow_id in tqdm(workflow_ids):
+                # Create Workflow object
+                workflow = client.Workflow(workflow_id)
+                workflow_name = workflow.__dict__['raw']['display_name']
+                # Add the subject set created previously
+                print(f"\nNOTE: Adding subject set {subject_set.display_name} to workflow {workflow_name}")
+                workflow.add_subject_sets([subject_set])
+                # Save
+                workflow.save()
+                project.save()
+
+        except Exception as e:
+            raise Exception(f"ERROR: Could not link media {media.id} to project workflows.\n{e}")
 
     # Update the dataframe to now contain the subject IDs
     # This is needed when downloading annotations later.
@@ -206,7 +208,7 @@ def upload_to_zooniverse(args):
             media_name = media.name
             media_dir = f"{output_dir}/{media_id}"
             frame_dir = f"{media_dir}/frames"
-            os.makedirs(frame_dir, exist_ok=True)
+            os.makedirs(frame_dir)
             print(f"NOTE: Media ID {media_id} corresponds to {media_name}")
 
             # Get the frames that have some navigational data instead of downloading all of the frames
@@ -259,7 +261,9 @@ def upload_to_zooniverse(args):
             # ---------------------
             # Upload to Zooniverse
             # ---------------------
-            dataframe = upload(panoptes_client, project, media, dataframe)
+            set_active = args.set_active
+
+            dataframe = upload(panoptes_client, project, media, dataframe, set_active)
             dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
 
 
@@ -300,6 +304,9 @@ def main():
     parser.add_argument("--dist_thresh", type=float,
                         default=1.5,
                         help="The distance (m) between successive frames to sample")
+
+    parser.add_argument("--set_active", action='store_true',
+                        help="Make subject set active")
 
     parser.add_argument("--upload", action='store_true',
                         help="Upload media to Zooniverse (debugging)")
