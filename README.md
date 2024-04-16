@@ -28,12 +28,13 @@ Follow instructions [here](https://aggregation-caesar.zooniverse.org/Scripts.htm
 
 ```python
 # In Anaconda terminal
+cd ./Annotations/Season_N/
 
-# This outputs 4 files 
+# This outputs 4 .yaml files 
 panoptes_aggregation config click-a-coral-workflows.csv 25828 -v 355.143 
 
-# This outputs 2 files
-panoptes_aggregation extract click-a-coral-classifications Extractor_config_workflow_25828_V355.143.yaml -o example
+# This outputs 3 .csv files
+panoptes_aggregation extract click-a-coral-classifications.csv Extractor_config_workflow_25828_V355.143.yaml
 
 
 ```
