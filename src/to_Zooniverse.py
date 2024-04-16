@@ -306,7 +306,7 @@ def main():
                         help="The distance (m) between successive frames to sample")
 
     parser.add_argument("--set_active", action='store_true',
-                        help="Make subject set active")
+                        help="Make subject-set active with current workflow")
 
     parser.add_argument("--upload", action='store_true',
                         help="Upload media to Zooniverse (debugging)")
