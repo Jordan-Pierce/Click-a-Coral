@@ -18,3 +18,22 @@ conda activate zooniverse
 python Zooniverse/install.py
 
 ```
+
+### from_Zooniverse
+
+Follow instructions [here](https://aggregation-caesar.zooniverse.org/Scripts.html); export the following:
+
+- "Request new classification export" --> click-a-coral-classifications.csv  
+- "Request new workflow export" - CSV --> click-a-coral-workflows.csv
+
+```python
+# In Anaconda terminal
+
+# This outputs 4 files 
+panoptes_aggregation config click-a-coral-workflows.csv 25828 -v 355.143 
+
+# This outputs 2 files
+panoptes_aggregation extract click-a-coral-classifications Extractor_config_workflow_25828_V355.143.yaml -o example
+
+
+```

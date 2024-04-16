@@ -34,8 +34,8 @@ def run_shape_extractor():
 #   See to_Zooniverse.py for how it should be set up
 
 # Input and output folders
-image_folder = f"./Data/images"
-output_folder = f"./Data/workflow"
+image_folder = f"./Annotations/images"
+output_folder = f"./Annotations/workflow"
 os.makedirs(output_folder, exist_ok=True)
 
 # TODO
