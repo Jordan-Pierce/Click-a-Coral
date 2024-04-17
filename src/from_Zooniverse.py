@@ -1,4 +1,7 @@
 import os
+import glob
+import json
+import argparse
 from tqdm import tqdm
 
 import numpy as np
@@ -12,156 +15,234 @@ from panoptes_aggregation.csv_utils import unjson_dataframe
 # ----------------------------------------------------------------------------------------------------------------------
 # Functions
 # ----------------------------------------------------------------------------------------------------------------------
-# TODO
-#   Create functions that actually aggregate / reduce the results from multiple users for each subject (frame)
-#   Aggregation / reduction is somewhat heuristic, so look into techniques that help with this (including ML methods).
-#   The end goal is that we export aggregated / reduced results into YOLO format, which we can use for model training.
-#   See here for more details on how to do this using panoptes-aggregate
-#   https://aggregation-caesar.zooniverse.org/How_Clustering_Works.html
 
-def run_shape_extractor():
+def clean_csv_file(input_csv, label_dir, workflow_id, version):
     """
 
-    :return:
     """
+    # Output CSV for creating training data
+    output_csv = f"{label_dir}/extracted_data.csv"
+
+    # Read the file
+    df = pd.read_csv(input_csv)
+    # Filter by workflow id and version
+    df = df[df['workflow_id'] >= workflow_id]
+    df = df[df['workflow_version'] >= version]
+
+    # Change the dataframe in place
+    unjson_dataframe(df)
+
+    # Loop through the dataframe annotations, and restructure it
+    clean_df = []
+
+    for i, r in tqdm(df.iterrows()):
+
+        # Get the image metadata
+        subject_data = json.loads(r['subject_data'])
+        subject_id = next(iter(subject_data))
+        subject_data = subject_data[subject_id]
+        subject_data['Subject ID'] = subject_id
+
+        # Convert from string to list of dicts
+        # Get all but the last one, since last is NULL
+        annotations = json.loads(r['annotations'])[:-1]
+
+        for i in range(0, len(annotations), 3):
+
+            try:
+                # Access three elements at a time
+                t2, t0, t1 = annotations[i: i + 3]
+
+                # Extract the bounding box
+                bbox = t0['value'][0]
+
+                x = bbox['x']
+                y = bbox['y']
+                w = bbox['width']
+                h = bbox['height']
+
+                # Extract the label
+                choice = t1['value'][0]
+                label = choice['choice']
+
+                # Create a subset of the row for this annotation
+                new_row = r.copy()[['classification_id', 'user_name', 'user_id', 'user_ip', 'created_at']]
+
+                # Create a dict that contains all information
+                new_row = {**new_row, **subject_data}
+
+                new_row['x'] = x
+                new_row['y'] = y
+                new_row['w'] = w
+                new_row['h'] = h
+                new_row['label'] = label
+
+                # Add to the updated dataframe
+                clean_df.append(new_row)
+
+            except Exception as e:
+                # There isn't box coordinates, not sure why this happens sometimes?
+                pass
+
+    # Create a pandas dataframe, save it
+    clean_df = pd.DataFrame(clean_df)
+    clean_df.to_csv(output_csv)
+
+    return clean_df, output_csv
+
+
+def plot_samples(df, image_dir, output_dir, num_samples):
+    """
+
+    """
+    # Get a color mapping for all the users first
+    usernames = df['user_name'].unique().tolist()
+    color_codes = {username: tuple(np.random.rand(3, )) for username in usernames}
+
+    for _ in range(num_samples):
+
+        # Pull a random row
+        r = df.sample(n=1)
+
+        # Get the meta
+        media_id = r['Media ID'].values[0]
+        frame_name = r['Frame Name'].values[0]
+
+        # Get media folder, the frame path
+        media_folders = glob.glob(f"{image_dir}\\*")
+        media_folder = [f for f in media_folders if str(media_id) in f][0]
+        frame_path = f"{media_folder}\\frames\\{frame_name}"
+
+        # Make sure the file exists before opening
+        if not os.path.exists(frame_path):
+            print(f"ERROR: Could not find {frame_name} in {media_folder} folder")
+            continue
+
+        # Set the output file name
+        output_file = f"{output_dir}\\{frame_name}"
+
+        # Skip if it already exists
+        if os.path.exists(output_file):
+            continue
+
+        # Open the image
+        image = plt.imread(frame_path)
+
+        # Get all the boxes for this image
+        subset = df[(df['Media ID'] == media_id) & (df['Frame Name'] == frame_name)]
+        users = subset['user_name'].unique().tolist()
+
+        # Create the figure
+        fig, ax = plt.subplots(figsize=(20, 10))
+
+        # Lists to store information for the legend
+        legend_labels = []
+        edge_patches = []
+        boxes_per_frame = []
+
+        for u_idx, user in enumerate(users):
+
+            # Get the user's color
+            edge_color = color_codes[user]
+
+            # Get the user's annotations
+            annotations = subset[subset['user_name'] == user]
+            num_annotations = len(annotations)
+
+            # Loop through all the user's annotations
+            for i, r in annotations.iterrows():
+
+                # Extract the values of this annotation
+                x, y, w, h = r[['x', 'y', 'w', 'h']]
+
+                # Plot the annotation the user made
+                rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor=edge_color, facecolor='none')
+                ax.add_patch(rect)
+
+            # Add the user's color and number of annotations to legend
+            legend_labels.append(f'User {user} - {num_annotations} boxes')
+            edge_patch = patches.Patch(color=edge_color, label=f'User {u_idx + 1}')
+            edge_patches.append(edge_patch)
+
+        # Add legend outside the plot
+        ax.legend(handles=edge_patches, labels=legend_labels, loc='upper left', bbox_to_anchor=(1, 1))
+
+        # Save with same name as frame in examples folder
+        plt.title(f"Media {media_id} - Frame {frame_name}")
+        plt.suptitle(f"{len(subset)} annotations")
+        plt.imshow(image)
+        plt.savefig(output_file, bbox_inches='tight')
+        plt.close()
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------------------------------------------------
-# TODO
-#   This should be converted into a script that be ran via CMD using argparse
-#   See to_Zooniverse.py for how it should be set up
 
-# Input and output folders
-image_folder = f"./Annotations/images"
-output_folder = f"./Annotations/workflow"
-os.makedirs(output_folder, exist_ok=True)
+def main():
+    """
 
-# TODO
-#   Run a sub-process to extract the shapes (rectangles) as a csv file.
-#   There is a way to do this via GUI or CMD (but not python?) So use
-#   sub-process to do this within the script.
-#   See here for more details on how to do this using panoptes-aggregate
-#   https://aggregation-caesar.zooniverse.org/Scripts.html
+    """
+    parser = argparse.ArgumentParser(description="Convert Zooniverse Annotations.")
 
-# Extract the shapes for the workflow
-run_shape_extractor()
+    parser.add_argument("--season_num", type=int,
+                        default=1,
+                        help="Season number.")
 
-# Path to the extracted csv file
-csv_path = "Data/aggregation/shape_extractor_rectangle_workflow.csv"
-df = pd.read_csv(csv_path)
-unjson_dataframe(df)
+    parser.add_argument("--workflow_id", type=int,
+                        default=25828,
+                        help="Workflow ID.")
 
-# The current media
-media_id = None
-media_csv = f"./Data/{media_id}/frame.csv"
-media_df = pd.read_csv(media_csv)
+    parser.add_argument("--version", type=float,
+                        default=355.143,
+                        help="Version.")
 
-# To record results for all users activity
-all_users_results = {}
+    parser.add_argument("--input_csv", type=str,
+                        help="Path to the input CSV file.")
 
-# Loop through all the frames in dataset
-for frame_id in tqdm(media_df['Frame ID'].unique()):
+    parser.add_argument("--image_dir", type=str,
+                        help="Path to the image directory.")
 
-    # Get the mapping from frame to subject id
-    subject_id = media_df[media_df['Frame ID'] == frame_id]['Subject ID'].values[0]
-    df_sub = df[df['Subject ID'] == subject_id]
-    df_sub = df_sub.dropna()
+    parser.add_argument("--label_dir", type=str,
+                        help="Path to the label directory.")
 
-    # Get all users boxes for current frame
-    x_lists = df_sub['data.frame0.T0_tool0_x'].values
-    y_lists = df_sub['data.frame0.T0_tool0_y'].values
-    w_lists = df_sub['data.frame0.T0_tool0_width'].values
-    h_lists = df_sub['data.frame0.T0_tool0_height'].values
+    parser.add_argument("--num_samples", type=int,
+                        default=100,
+                        help="Number of samples to plot.")
 
-    # Get usernames
-    users_frame = df_sub['user_name'].values
-    num_users_frame = len(users_frame)
+    args = parser.parse_args()
 
-    if not num_users_frame:
-        continue
+    season_num = args.season_num
+    workflow_id = args.workflow_id
+    version = args.version
 
-    # Plot the data
-    fig, ax = plt.subplots(figsize=(20, 10))
+    num_samples = args.num_samples
 
-    # Lists to store information for the legend
-    legend_labels = []
-    edge_patches = []
-    boxes_per_frame = []
+    # Extract the shapes for the workflow
+    input_csv = args.input_csv
+    image_dir = f"{args.image_dir}\\Season_{season_num}"
+    label_dir = f"{args.label_dir}\\Season_{season_num}"
+    sample_dir = f"{label_dir}\\user_samples"
 
-    # Plot bounding boxes
-    for user_idx, (x_list, y_list, w_list, h_list) in enumerate(zip(x_lists, y_lists, w_lists, h_lists)):
+    assert os.path.exists(input_csv), "ERROR: Input CSV provided does not exist"
+    assert os.path.exists(image_dir), "ERROR: Image directory provided does not exist"
 
-        # Generate a random RGB color for each user
-        edge_color = tuple(np.random.rand(3, ))
-        # Tally for user boxes
-        user_num_boxes = 0
+    # Make the label directory
+    os.makedirs(sample_dir, exist_ok=True)
 
-        # Loop through each users' boxes
-        for x, y, w, h in zip(x_list, y_list, w_list, h_list):
+    print("Season Number:", season_num)
+    print("Workflow ID:", workflow_id)
+    print("Version:", version)
+    print("Input CSV:", input_csv)
+    print("Image Directory:", image_dir)
+    print("Label Directory:", label_dir)
 
-            # Must be a valid box
-            if w and h:
+    # Clean the classification csv, convert to a dataframe for creating training data
+    df, path = clean_csv_file(input_csv, label_dir, workflow_id, version)
 
-                # Plot each box the user made
-                rect = patches.Rectangle((x, y), w, h, linewidth=1, edgecolor=edge_color, facecolor='none')
-                ax.add_patch(rect)
+    if num_samples:
+        plot_samples(df, image_dir, sample_dir, num_samples)
 
-                # Tally the number of valid boxes
-                user_num_boxes += 1
 
-                # Tally for the number of boxes made per user for all frames in dataset
-                if users_frame[user_idx] in all_users_results:
-                    all_users_results[users_frame[user_idx]] += 1
-                else:
-                    all_users_results[users_frame[user_idx]] = 1
-
-        # Add to the list of boxes made per user
-        boxes_per_frame.append(user_num_boxes)
-
-        # Store information for the legend
-        legend_labels.append(f'User {users_frame[user_idx]} - {user_num_boxes} boxes')
-        edge_patch = patches.Patch(color=edge_color, label=f'User {user_idx + 1}')
-        edge_patches.append(edge_patch)
-
-    # Add legend outside the plot
-    ax.legend(handles=edge_patches, labels=legend_labels, loc='upper left', bbox_to_anchor=(1, 1))
-
-    # Total boxes and average boxes per frame
-    total_boxes = np.sum(boxes_per_frame).astype(int)
-    average_boxes = np.mean(boxes_per_frame).astype(int)
-
-    # Show the plot
-    plt.title(f"Frame: {frame_id}    "
-              f"Total boxes: {total_boxes}    "
-              f"Average boxes: {average_boxes}")
-
-    # Save with same name as frame in results folder
-    plt.imshow(plt.imread(f"{image_folder}/{frame_id}.png"))
-    plt.savefig(f"{output_folder}/{frame_id}.png", bbox_inches='tight')
-    # plt.show()
-    plt.close()
-
-# This plots all the user's data as a bar chart
-df = pd.DataFrame(list(all_users_results.items()), columns=['Category', 'Value'])
-
-if not df.empty:
-    # Plotting the bar chart
-    plt.figure(figsize=(10, 6))
-    # Create a gradient color map for each bar based on values
-    colors = plt.cm.viridis(df['Value'] / df['Value'].max())
-    # Plotting the bar chart with gradient colors
-    bars = plt.bar(df.index, df['Value'], color=colors)
-    # Adding labels and title
-    plt.xlabel('User')
-    plt.ylabel('Count')
-    plt.title('User Annotations')
-    # Remove x-axis ticks and labels
-    plt.xticks([])
-    # Display the plot
-    plt.savefig(f"{output_folder}/AllUsers.png")
-    plt.show()
-    plt.close()
-
-print("Done.")
+if __name__ == "__main__":
+    main()

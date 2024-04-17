@@ -5,8 +5,6 @@
 ### Install
 
 ```python
-# In Anaconda terminal
-
 # First, create a venv for this repo
 conda create --name zooniverse python=3.8 -y 
 
@@ -15,26 +13,6 @@ git clone https://github.com/Jordan-Pierce/Zooniverse.git
 
 # Third, install the dependencies within venv
 conda activate zooniverse
-python Zooniverse/install.py
-
-```
-
-### from_Zooniverse
-
-Follow instructions [here](https://aggregation-caesar.zooniverse.org/Scripts.html); export the following:
-
-- "Request new classification export" --> click-a-coral-classifications.csv  
-- "Request new workflow export" - CSV --> click-a-coral-workflows.csv
-
-```python
-# In Anaconda terminal
-cd ./Annotations/Season_N/
-
-# This outputs 4 .yaml files 
-panoptes_aggregation config click-a-coral-workflows.csv 25828 -v 355.143 
-
-# This outputs 3 .csv files
-panoptes_aggregation extract click-a-coral-classifications.csv Extractor_config_workflow_25828_V355.143.yaml
-
+python install.py
 
 ```

@@ -102,13 +102,10 @@ install_requires = [
     'scipy',
     'scikit_learn',
     'matplotlib',
-    'opencv_python',
-    'opencv-contrib-python',
     'scikit_image',
 
     'tator',
     'panoptes-client',
-    'panoptes-aggregation',
 
     # Don't mess with these
     'roboflow',
