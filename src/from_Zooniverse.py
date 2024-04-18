@@ -138,7 +138,6 @@ def plot_samples(df, image_dir, output_dir, num_samples):
         # Lists to store information for the legend
         legend_labels = []
         edge_patches = []
-        boxes_per_frame = []
 
         for u_idx, user in enumerate(users):
 
@@ -159,6 +158,14 @@ def plot_samples(df, image_dir, output_dir, num_samples):
                 rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor=edge_color, facecolor='none')
                 ax.add_patch(rect)
 
+                # Plot the class label on the bbox
+                ax.text(x + w * 0.02,
+                        y + h * 0.98,
+                        r['label'],
+                        color='white', fontsize=8,
+                        ha='left', va='top',
+                        bbox=dict(facecolor=edge_color, alpha=0.5))
+
             # Add the user's color and number of annotations to legend
             legend_labels.append(f'User {user} - {num_annotations} boxes')
             edge_patch = patches.Patch(color=edge_color, label=f'User {u_idx + 1}')
@@ -169,10 +176,17 @@ def plot_samples(df, image_dir, output_dir, num_samples):
 
         # Save with same name as frame in examples folder
         plt.title(f"Media {media_id} - Frame {frame_name}")
-        plt.suptitle(f"{len(subset)} annotations")
+        plt.suptitle(f"{len(subset)} Annotations")
         plt.imshow(image)
         plt.savefig(output_file, bbox_inches='tight')
         plt.close()
+
+
+def plot_user_distribution(df, output_dir):
+    """
+
+    """
+    return
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -240,8 +254,11 @@ def main():
     # Clean the classification csv, convert to a dataframe for creating training data
     df, path = clean_csv_file(input_csv, label_dir, workflow_id, version)
 
-    if num_samples:
-        plot_samples(df, image_dir, sample_dir, num_samples)
+    # Plot some samples
+    plot_samples(df, image_dir, sample_dir, num_samples)
+
+    # Plot the users distribution
+    plot_user_distribution(df, label_dir)
 
 
 if __name__ == "__main__":
