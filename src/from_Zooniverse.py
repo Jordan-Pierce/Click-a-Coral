@@ -16,18 +16,26 @@ from panoptes_aggregation.csv_utils import unjson_dataframe
 # Functions
 # ----------------------------------------------------------------------------------------------------------------------
 
-def clean_csv_file(input_csv, label_dir, workflow_id, version):
+def clean_csv_file_legacy(input_csv, label_dir):
     """
+    This is a function to clean the CSV file provided from Zooniverse
+    containing user annotations. The workflow (ID 25828) was changed in
+    04/2024, and this function will not work with the newest workflow.
 
+    We had some user annotations (~9k?) in the old workflow that could still be used...
+
+    Use this function as an example for how to clean data for the newest
+    workflow. Use both functions to extract and clean the data for the
+    respective workflows, and then combine them into a single pandas dataframe.
     """
     # Output CSV for creating training data
-    output_csv = f"{label_dir}/extracted_data.csv"
+    output_csv = f"{label_dir}/extracted_data_legacy.csv"
 
     # Read the file
     df = pd.read_csv(input_csv)
     # Filter by workflow id and version
-    df = df[df['workflow_id'] >= workflow_id]
-    df = df[df['workflow_version'] >= version]
+    df = df[df['workflow_id'] == 25828]
+    df = df[df['workflow_version'] == 355.143]
 
     # Change the dataframe in place
     unjson_dataframe(df)
@@ -89,6 +97,17 @@ def clean_csv_file(input_csv, label_dir, workflow_id, version):
     clean_df.to_csv(output_csv)
 
     return clean_df, output_csv
+
+
+def clean_csv_file(input_csv, label_dir,  workflow_id, version):
+    """
+    This is a function to clean the CSV file provided from Zooniverse...
+
+    Use the workflow on Zooniverse to help understand how the data might
+    be stored, then use the legacy function above to assist in cleaning
+    the data.
+    """
+    return
 
 
 def plot_samples(df, image_dir, output_dir, num_samples):
@@ -189,6 +208,9 @@ def plot_user_distribution(df, output_dir):
     return
 
 
+# TODO add visualization functions here
+# ...
+
 # ----------------------------------------------------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------------------------------------------------
@@ -204,11 +226,11 @@ def main():
                         help="Season number.")
 
     parser.add_argument("--workflow_id", type=int,
-                        default=25828,
+                        default=26428,
                         help="Workflow ID.")
 
     parser.add_argument("--version", type=float,
-                        default=355.143,
+                        default=16.18,
                         help="Version.")
 
     parser.add_argument("--input_csv", type=str,
@@ -221,7 +243,7 @@ def main():
                         help="Path to the label directory.")
 
     parser.add_argument("--num_samples", type=int,
-                        default=100,
+                        default=1000,
                         help="Number of samples to plot.")
 
     args = parser.parse_args()
@@ -251,14 +273,23 @@ def main():
     print("Image Directory:", image_dir)
     print("Label Directory:", label_dir)
 
+    # Clean the classification csv, convert to a dataframe for creating training data (legacy)
+    df_legacy, path_legacy = clean_csv_file_legacy(input_csv, label_dir)
+
     # Clean the classification csv, convert to a dataframe for creating training data
     df, path = clean_csv_file(input_csv, label_dir, workflow_id, version)
+
+    # TODO Do something with dataframes here
+    # ...
 
     # Plot some samples
     plot_samples(df, image_dir, sample_dir, num_samples)
 
     # Plot the users distribution
     plot_user_distribution(df, label_dir)
+
+    # TODO visualization functions here
+    # ...
 
 
 if __name__ == "__main__":
