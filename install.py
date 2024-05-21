@@ -108,7 +108,6 @@ install_requires = [
     'panoptes-client',
 
     # Don't mess with these
-    'roboflow',
     'supervision',
 ]
 
