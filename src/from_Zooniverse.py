@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-from panoptes_aggregation.csv_utils import unjson_dataframe
+#from panoptes_aggregation.csv_utils import unjson_dataframe
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -38,7 +38,7 @@ def clean_csv_file_legacy(input_csv, label_dir):
     df = df[df['workflow_version'] == 355.143]
 
     # Change the dataframe in place
-    unjson_dataframe(df)
+    #unjson_dataframe(df)
 
     # Loop through the dataframe annotations, and restructure it
     clean_df = []
@@ -107,7 +107,72 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
     be stored, then use the legacy function above to assist in cleaning
     the data.
     """
-    return
+    # Output CSV for creating training data
+    output_csv = f"{label_dir}/extracted_data.csv"
+
+    # Read the file
+    df = pd.read_csv(input_csv)
+    # Filter by workflow id and version
+    df = df[df['workflow_id'] == workflow_id]
+    df = df[df['workflow_version'] == version]
+
+    # Loop through the dataframe annotations, and restructure it
+    clean_df = []
+
+    for i, r in tqdm(df.iterrows()):
+
+        # Get the image metadata
+        subject_data = json.loads(r['subject_data'])
+        subject_id = next(iter(subject_data))
+        subject_data = subject_data[subject_id]
+        subject_data['Subject ID'] = subject_id
+
+        # Convert from string to list of dicts
+        # Get all but the last one, since last is NULL
+        annotations = json.loads(r['annotations'])[:-1]
+
+        for i in range(0, len(annotations), 3):
+
+            try:
+                # Access three elements at a time
+                t2, t1, t0 = annotations[i: i + 3]
+
+                # Extract the bounding box
+                bbox = t0['value'][0]
+
+                x = bbox['x']
+                y = bbox['y']
+                w = bbox['width']
+                h = bbox['height']
+
+                # Extract the label
+                choice = t1['value'][0]
+                label = choice['choice']
+
+                # Create a subset of the row for this annotation
+                new_row = r.copy()[['classification_id', 'user_name', 'user_id', 'user_ip', 'created_at']]
+
+                # Create a dict that contains all information
+                new_row = {**new_row, **subject_data}
+
+                new_row['x'] = x
+                new_row['y'] = y
+                new_row['w'] = w
+                new_row['h'] = h
+                new_row['label'] = label
+
+                # Add to the updated dataframe
+                clean_df.append(new_row)
+
+            except Exception as e:
+                # There isn't box coordinates, not sure why this happens sometimes?
+                pass
+
+    # Create a pandas dataframe, save it
+    clean_df = pd.DataFrame(clean_df)
+    clean_df.to_csv(output_csv)
+
+    return clean_df, output_csv
 
 
 def plot_samples(df, image_dir, output_dir, num_samples):
@@ -243,7 +308,7 @@ def main():
                         help="Path to the label directory.")
 
     parser.add_argument("--num_samples", type=int,
-                        default=1000,
+                        default=0,
                         help="Number of samples to plot.")
 
     args = parser.parse_args()
@@ -274,7 +339,7 @@ def main():
     print("Label Directory:", label_dir)
 
     # Clean the classification csv, convert to a dataframe for creating training data (legacy)
-    df_legacy, path_legacy = clean_csv_file_legacy(input_csv, label_dir)
+    #df_legacy, path_legacy = clean_csv_file_legacy(input_csv, label_dir)
 
     # Clean the classification csv, convert to a dataframe for creating training data
     df, path = clean_csv_file(input_csv, label_dir, workflow_id, version)
@@ -286,7 +351,7 @@ def main():
     plot_samples(df, image_dir, sample_dir, num_samples)
 
     # Plot the users distribution
-    plot_user_distribution(df, label_dir)
+    #plot_user_distribution(df, label_dir)
 
     # TODO visualization functions here
     # ...
