@@ -27,87 +27,74 @@ def group_subjectid(df, num_samples, image_dir, output_dir, output_csv):
     # Group by subject ID
     df = pd.read_csv(df)
     df['Subject ID'] = df['Subject ID'].astype(int)
-    df = df.groupby('Subject ID')
+    df = df.groupby("Media ID")
 
     count = 0
-    detections = {}
-    images = {}
     classes = ['ANTIPATHESFURCATA', 'ANTIPATHESATLANTICA', 'BEBRYCESP', 'MADRACISSP', 'MADREPORASP',
                'MURICEAPENDULA', 'PARAMURICIADESP', 'SWIFTIAEXSERTA', 'THESEANIVEA']
 
-    # Runs through each subject ID group
-    for subjectid, subjectid_df in df:
-        print(subjectid)
-        print("subject id", subjectid_df)
+    # Groups dataframe by media ID
+    for media_id, media_id_df in df:
 
-        # If there is only one annotation, skip clustering and reduction
-        if len(subjectid_df) > 1:
-            # Makes clusters and saves their labels
-            labels = make_clusters(subjectid_df)
+        # Initializes dicts for yolo convert later
+        detections = {}
+        images = {}
 
-            # Reduce clusters and bounding boxes
-            reduced_boxes = reduce_boxes(subjectid_df, labels)
+        df2 = media_id_df.groupby("Subject ID")
 
-            # Removes single clusters
-            # NOTE: This is for testing purposes only
-            no_single_clusters = remove_single_clusters(reduced_boxes)
+        # Runs through each subject ID group
+        for subjectid, subjectid_df in df2:
 
-            # Visually compare images with normal reductions to those with removed single clusters
-            # NOTE: This is for testing purposes only
-            image_path, image_name, jpg, media_id = get_image(reduced_boxes.iloc[0], image_dir)
-            visual_compare(reduced_boxes, no_single_clusters, image_path, output_dir, image_name)
+            # If there is only one annotation, skip clustering and reduction
+            if len(subjectid_df) > 1:
+                # Makes clusters and saves their labels
+                labels = make_clusters(subjectid_df)
 
-            # Drops the cluster column
-            reduced_boxes = reduced_boxes.drop(columns=['clusters'])
+                # Reduce clusters and bounding boxes
+                reduced_boxes = reduce_boxes(subjectid_df, labels)
 
+                # Removes single clusters
+                # NOTE: This is for testing purposes only
+                no_single_clusters = remove_single_clusters(reduced_boxes)
 
+                # Visually compare images with normal reductions to those with removed single clusters
+                # NOTE: This is for testing purposes only
+                image_path, image_name, jpg = get_image(reduced_boxes.iloc[0], image_dir)
+                visual_compare(reduced_boxes, no_single_clusters, image_path, output_dir, image_name)
 
+                # Drops the cluster column
+                reduced_boxes = reduced_boxes.drop(columns=['clusters'])
 
-            # # Experimenting with yolo conversion
-            #
-            # # Makes image folder if not already made
-            # #os.makedirs(f"{output_dir}\\Yolo\\{media_id}", exist_ok=True)
-            # detection = make_detection(reduced_boxes, classes)
-            #
-            # # Add detection to detections dict, this is our annotations argument
-            # detections[jpg] = detection
-            # #print("detections", detections)
-            #
-            # print("imagepath", image_path)
-            # image = cv2.imread(image_path)
-            # images[jpg] = image
-            # print("testing", images)
-            #
-            # #ds2.as_folder_structure(output_dir)
+            else:
+                reduced_boxes = subjectid_df
 
-        else:
-            reduced_boxes = subjectid_df
+                # Plot the single annotation
+                image_path, image_name, jpg = get_image(reduced_boxes.iloc[0], image_dir)
+                plot_boxes(reduced_boxes, image_path, image_name, output_dir)
 
-            # Plot the single annotation
-            image_path, image_name, jpg, media_id = get_image(reduced_boxes.iloc[0], image_dir)
-            plot_boxes(reduced_boxes, image_path, image_name, output_dir)
+            # Saves reduced annotations to csv
+            save_to_csv(output_csv, reduced_boxes)
 
-        # Saves reduced annotations to csv
-        #save_to_csv(output_csv, reduced_boxes)
-        # print("images", images)
-        #
-        # ds = sv.DetectionDataset(classes=classes, images=images, annotations=detections)
-        # # ds2 =sv.ClassificationDataset(classes=classes, images=images, annotations=detections)
-        #
-        # # print("ds", ds)
-        #
-        # # save as yolo format
-        # yolo_images = f"{output_dir}\\images"
-        # yolo_labels = f"{output_dir}\\labels"
-        # print("check")
-        #
-        # ds.as_yolo(images_directory_path=yolo_images, annotations_directory_path=yolo_labels)
+            # Add detection to detections dict, this is our annotations argument
+            detection = make_detection(reduced_boxes, classes)
+            detections[jpg] = detection
+
+            # Adds image to images dict for yolo convert later
+            image = cv2.imread(image_path)
+            images[jpg] = image
+
+        # Converts to Yolo format
+        os.makedirs(f"{output_dir}\\Yolo\\{media_id}", exist_ok=True)
+        yolo_dir = f"{output_dir}\\Yolo\\{media_id}"
+        ds = sv.DetectionDataset(classes=classes, images=images, annotations=detections)
+
+        yolo_format(ds, yolo_dir, classes)
+
         # Checks if it is over the number of samples
         count += 1
         if count > num_samples:
             sys.exit(1)
 
-    return filtered_df
 
 def make_clusters(annotations):
 
@@ -127,7 +114,7 @@ def make_clusters(annotations):
     labels = clust.labels_
 
     # Plots the clustering (OPTIONAL)
-    #point_plot(array, labels)
+    point_plot(array, labels)
 
     return labels
 
@@ -179,7 +166,7 @@ def reduce_boxes(values, labels):
         # Ignore if it has a cluster size of 1
         if cluster == -1:
             # Add directly to reduced annotations
-            reduced = pd.concat([reduced, cluster_df], ignore_index=True)
+            reduced = pd.concat([cluster_df, reduced], ignore_index=True)
             continue
         else:
             # Find the bounding box of best fit for the cluster
@@ -201,10 +188,10 @@ def reduce_boxes(values, labels):
             new_row = pd.concat([new_row, avg_bbox], axis=1)
 
             # Add best-fit bounding box to reduced dataframe
-            reduced = pd.concat([reduced, new_row], ignore_index=True)
+            reduced = pd.concat([new_row, reduced], ignore_index=True)
 
     # Plot the reduced clustering (OPTIONAL)
-    #point_plot(reduced.to_numpy(), reduced.index)
+    point_plot(reduced.to_numpy(), reduced.index)
 
     return(reduced)
 
@@ -288,14 +275,13 @@ def get_image(row, image_dir):
 
     # Give name to the image
     image_name = f"{media_id} - {frame_name}"
-    jpg_name = f"{media_id}.jpg"
 
     # Get media folder, the frame path
     media_folders = glob.glob(f"{image_dir}\\*")
     media_folder = [f for f in media_folders if str(media_id) in f][0]
     frame_path = f"{media_folder}\\frames\\{frame_name}"
 
-    return frame_path, image_name, jpg_name, media_id
+    return frame_path, image_name, frame_name
 
 def plot_boxes(df, image_path, image_name, output_dir):
 
@@ -404,14 +390,28 @@ def make_detection(annotations, class_labels):
             if cl == row['label']:
                 classes[i] = j
 
-    print(classes)
+    #print(classes)
 
     # Create a Detection dataclass for an image
     detection = sv.Detections(xyxy=xyxy, class_id=classes)
-    print(detection)
+    #print(detection)
 
     return detection
 
+def yolo_format(ds, yolo_dir, classes):
+
+    yolo_images = f"{yolo_dir}\\images"
+    yolo_labels = f"{yolo_dir}\\labels"
+
+    # Convert to yolo format
+    ds.as_yolo(images_directory_path=yolo_images, annotations_directory_path=yolo_labels)
+
+    # Add txt file
+    txt_path = f"{yolo_dir}\\classes.txt"
+
+    with open(txt_path, "w") as file:
+        for string in classes:
+            file.write(string + "\n")
 
 def main():
     parser = argparse.ArgumentParser(description="Reduce annotations for an image frame")
@@ -419,28 +419,17 @@ def main():
     parser.add_argument("-csv", type=str,
                         help="Input CSV file")
 
-    # parser.add_argument("-id", type=int,
-    #                     #default=98330167, #
-    #                     #default=98330569, #26313.jpg
-    #                     #default=98330111, #21368.jpg
-    #                     #default=98330065, #8661.jpg
-    #                     #default=98330040, #269.jpg
-    #                     #default=98330575,
-    #                     #default=98361988, #199870.jpg
-    #                     #default=98333601, #175594.jpg
-    #                     help="Subject ID")
-
-    parser.add_argument("-image_dir", #type=str,
+    parser.add_argument("-image_dir", type=str,
                         help="The image directory")
 
-    parser.add_argument("-output_dir", #type=str,
+    parser.add_argument("-output_dir", type=str,
                          help="Output directory")
 
     parser.add_argument("-num_samples", type=int,
                         default=1,
                         help="Number of samples to run through")
 
-    parser.add_argument("--season_num", type=int,
+    parser.add_argument("-season_num", type=int,
                         default=1,
                         help="Season number.")
 
@@ -464,25 +453,8 @@ def main():
     os.makedirs(f"{output_dir}\\Yolo", exist_ok=True)
 
 
-
     try:
-        annotations = group_subjectid(input_csv, num_samples, image_dir, output_dir, output_csv)
-
-        # labels = make_clusters(annotations)
-        #
-        # final_bbox = reduce_boxes(annotations, labels)
-        #
-        # no_single_clusters = remove_single_clusters(final_bbox)
-        #
-        # visual_compare(final_bbox, no_single_clusters, args.image)
-
-        #save_to_csv(output_csv, final_bbox)
-
-        #plot_boxes(final_bbox, args.image)
-
-        #removed = remove_big_boxers(final_bbox)
-
-        #plot_boxes(removed, args.image, args.label_dir)
+        group_subjectid(input_csv, num_samples, image_dir, output_dir, output_csv)
 
         print("Done.")
 
