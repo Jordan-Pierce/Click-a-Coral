@@ -101,11 +101,18 @@ def clean_csv_file_legacy(input_csv, label_dir):
 
 def clean_csv_file(input_csv, label_dir,  workflow_id, version):
     """
-    This is a function to clean the CSV file provided from Zooniverse...
+    This is a function to clean the CSV file provided from Zooniverse
+    containing user annotations.
 
-    Use the workflow on Zooniverse to help understand how the data might
-    be stored, then use the legacy function above to assist in cleaning
-    the data.
+    Args:
+        input_csv (str): The original csv file from Click-a-Coral
+        label_dir (str): The output directory
+        workflow_id (int): The current workflow id
+        version (int): The current workflow version
+
+    Returns:
+        clean_df (Pandas dataframe): The cleaned dataframe
+        output_csv (str): The cleaned dataframe as a csv
     """
     # Output CSV for creating training data
     output_csv = f"{label_dir}/extracted_data.csv"
@@ -137,32 +144,35 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
                 # Access three elements at a time
                 t2, t1, t0 = annotations[i: i + 3]
 
-                # Extract the bounding box
-                bbox = t0['value'][0]
+                # Loop through individual annotations in t0
+                for j in range(0, len(t0['value'])):
 
-                x = bbox['x']
-                y = bbox['y']
-                w = bbox['width']
-                h = bbox['height']
+                    # Extract the bounding box
+                    bbox = t0['value'][j]
 
-                # Extract the label
-                choice = t1['value'][0]
-                label = choice['choice']
+                    x = bbox['x']
+                    y = bbox['y']
+                    w = bbox['width']
+                    h = bbox['height']
 
-                # Create a subset of the row for this annotation
-                new_row = r.copy()[['classification_id', 'user_name', 'user_id', 'user_ip', 'created_at']]
+                    # Extract the label
+                    choice = t1['value'][0]
+                    label = choice['choice']
 
-                # Create a dict that contains all information
-                new_row = {**new_row, **subject_data}
+                    # Create a subset of the row for this annotation
+                    new_row = r.copy()[['classification_id', 'user_name', 'user_id', 'user_ip', 'created_at']]
 
-                new_row['x'] = x
-                new_row['y'] = y
-                new_row['w'] = w
-                new_row['h'] = h
-                new_row['label'] = label
+                    # Create a dict that contains all information
+                    new_row = {**new_row, **subject_data}
 
-                # Add to the updated dataframe
-                clean_df.append(new_row)
+                    new_row['x'] = x
+                    new_row['y'] = y
+                    new_row['w'] = w
+                    new_row['h'] = h
+                    new_row['label'] = label
+
+                    # Add to the updated dataframe
+                    clean_df.append(new_row)
 
             except Exception as e:
                 # There isn't box coordinates, not sure why this happens sometimes?
@@ -265,17 +275,6 @@ def plot_samples(df, image_dir, output_dir, num_samples):
         plt.savefig(output_file, bbox_inches='tight')
         plt.close()
 
-
-def plot_user_distribution(df, output_dir):
-    """
-
-    """
-    return
-
-
-# TODO add visualization functions here
-# ...
-
 # ----------------------------------------------------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------------------------------------------------
@@ -344,17 +343,8 @@ def main():
     # Clean the classification csv, convert to a dataframe for creating training data
     df, path = clean_csv_file(input_csv, label_dir, workflow_id, version)
 
-    # TODO Do something with dataframes here
-    # ...
-
     # Plot some samples
     plot_samples(df, image_dir, sample_dir, num_samples)
-
-    # Plot the users distribution
-    #plot_user_distribution(df, label_dir)
-
-    # TODO visualization functions here
-    # ...
 
 
 if __name__ == "__main__":
