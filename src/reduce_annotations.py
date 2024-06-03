@@ -20,9 +20,7 @@ import supervision as sv
 # Functions
 # ----------------------------------------------------------------------------------------------------------------------
 
-def group_subjectid(df, num_samples, image_dir, output_dir, output_csv):
-
-    #TODO: Group by subject id and then turn every new group into a separate dataframe
+def group_subjectid(df, num_samples, image_dir, output_dir, output_csv, epsilon):
 
     # Group by subject ID
     df = pd.read_csv(df)
@@ -44,11 +42,16 @@ def group_subjectid(df, num_samples, image_dir, output_dir, output_csv):
 
         # Runs through each subject ID group
         for subjectid, subjectid_df in df2:
+            print("SubjectID", subjectid)
+            print(subjectid_df)
+
+            # Gets image information
+            image_path, image_name, jpg = get_image(subjectid_df.iloc[0], image_dir)
 
             # If there is only one annotation, skip clustering and reduction
             if len(subjectid_df) > 1:
                 # Makes clusters and saves their labels
-                labels = make_clusters(subjectid_df)
+                labels = make_clusters(subjectid_df, epsilon, image_path)
 
                 # Reduce clusters and bounding boxes
                 reduced_boxes = reduce_boxes(subjectid_df, labels)
@@ -59,20 +62,21 @@ def group_subjectid(df, num_samples, image_dir, output_dir, output_csv):
 
                 # Visually compare images with normal reductions to those with removed single clusters
                 # NOTE: This is for testing purposes only
-                image_path, image_name, jpg = get_image(reduced_boxes.iloc[0], image_dir)
                 visual_compare(reduced_boxes, no_single_clusters, image_path, output_dir, image_name)
 
                 # Drops the cluster column
-                reduced_boxes = reduced_boxes.drop(columns=['clusters'])
+                #reduced_boxes = reduced_boxes.drop(columns=['clusters'])
 
             else:
                 reduced_boxes = subjectid_df
 
+                reduced_boxes.insert(14, 'clusters', -1)
+
                 # Plot the single annotation
-                image_path, image_name, jpg = get_image(reduced_boxes.iloc[0], image_dir)
                 plot_boxes(reduced_boxes, image_path, image_name, output_dir)
 
             # Saves reduced annotations to csv
+            print("reduced", reduced_boxes)
             save_to_csv(output_csv, reduced_boxes)
 
             # Add detection to detections dict, this is our annotations argument
@@ -84,8 +88,8 @@ def group_subjectid(df, num_samples, image_dir, output_dir, output_csv):
             images[jpg] = image
 
         # Converts to Yolo format
-        os.makedirs(f"{output_dir}\\Yolo\\{media_id}", exist_ok=True)
-        yolo_dir = f"{output_dir}\\Yolo\\{media_id}"
+        os.makedirs(f"{output_dir}/Yolo/{media_id}", exist_ok=True)
+        yolo_dir = f"{output_dir}/Yolo/{media_id}"
         ds = sv.DetectionDataset(classes=classes, images=images, annotations=detections)
 
         yolo_format(ds, yolo_dir, classes)
@@ -95,8 +99,7 @@ def group_subjectid(df, num_samples, image_dir, output_dir, output_csv):
         if count > num_samples:
             sys.exit(1)
 
-
-def make_clusters(annotations):
+def make_clusters(annotations, epsilon, image_path):
 
     # Isolates x, y, width, and height values
     annotations = annotations[['x', 'y', 'w', 'h']]
@@ -107,14 +110,14 @@ def make_clusters(annotations):
     # Convert values into usable array for OPTICS clustering
     array = centers.to_numpy()
     #clust = OPTICS(min_samples=0.0, xi=0.01, min_cluster_size=None)
-    clust = OPTICS(min_samples=0.0, cluster_method='dbscan', eps=100, min_cluster_size=None)
+    clust = OPTICS(min_samples=0.0, cluster_method='dbscan', eps=epsilon, min_cluster_size=None)
     clust.fit(array)
 
     # Saves the clustering labels
     labels = clust.labels_
 
     # Plots the clustering (OPTIONAL)
-    point_plot(array, labels)
+    #point_plot(array, labels, image_path)
 
     return labels
 
@@ -136,8 +139,10 @@ def find_center(df):
 
     return centers
 
-def point_plot(array, labels):
+def point_plot(array, labels, image_path):
     # plot the clustering graph
+    image = plt.imread(image_path)
+
     plt.figure(figsize=(8, 6))
     scatter = plt.scatter(array[:, 0], array[:, 1], c=labels, s=50, alpha=0.6, cmap='viridis')
     print("check")
@@ -147,6 +152,7 @@ def point_plot(array, labels):
     plt.xlabel('Feature 1')
     plt.ylabel('Feature 2')
     plt.grid(True)
+    plt.imshow(image)
     plt.show()
 
 def reduce_boxes(values, labels):
@@ -191,7 +197,7 @@ def reduce_boxes(values, labels):
             reduced = pd.concat([new_row, reduced], ignore_index=True)
 
     # Plot the reduced clustering (OPTIONAL)
-    point_plot(reduced.to_numpy(), reduced.index)
+    #point_plot(reduced.to_numpy(), reduced.index)
 
     return(reduced)
 
@@ -277,9 +283,9 @@ def get_image(row, image_dir):
     image_name = f"{media_id} - {frame_name}"
 
     # Get media folder, the frame path
-    media_folders = glob.glob(f"{image_dir}\\*")
+    media_folders = glob.glob(f"{image_dir}/*")
     media_folder = [f for f in media_folders if str(media_id) in f][0]
-    frame_path = f"{media_folder}\\frames\\{frame_name}"
+    frame_path = f"{media_folder}/frames/{frame_name}"
 
     return frame_path, image_name, frame_name
 
@@ -306,7 +312,7 @@ def plot_boxes(df, image_path, image_name, output_dir):
     # Save with same name as frame in examples folder
     plt.title(f"{image_name}")
     plt.imshow(image)
-    plt.savefig(f"{output_dir}\\Visual_Comparison\\{image_name}", bbox_inches='tight')
+    plt.savefig(f"{output_dir}/Visual_Comparison/{image_name}", bbox_inches='tight')
     # plt.close()
 
 
@@ -326,7 +332,9 @@ def visual_compare(annotations1, annotations2, image_path, output_dir, image_nam
     image = plt.imread(image_path)
 
     # Plot the images side by side
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(13, 7))
+    plt.title(f"{image_name}")
+
 
     # Plot image 1 on the left subplot
     plt.subplot(1, 2, 1)
@@ -366,7 +374,7 @@ def visual_compare(annotations1, annotations2, image_path, output_dir, image_nam
                 bbox=dict(facecolor='black', alpha=0.5))
     plt.title('Without Single Clusters')
 
-    plt.savefig(f"{output_dir}\\Visual_Comparison\\{image_name}", bbox_inches='tight')
+    plt.savefig(f"{output_dir}/Visual_Comparison/{image_name}", bbox_inches='tight')
 
 def make_detection(annotations, class_labels):
 
@@ -390,24 +398,21 @@ def make_detection(annotations, class_labels):
             if cl == row['label']:
                 classes[i] = j
 
-    #print(classes)
-
     # Create a Detection dataclass for an image
     detection = sv.Detections(xyxy=xyxy, class_id=classes)
-    #print(detection)
 
     return detection
 
 def yolo_format(ds, yolo_dir, classes):
 
-    yolo_images = f"{yolo_dir}\\images"
-    yolo_labels = f"{yolo_dir}\\labels"
+    yolo_images = f"{yolo_dir}/images"
+    yolo_labels = f"{yolo_dir}/labels"
 
     # Convert to yolo format
     ds.as_yolo(images_directory_path=yolo_images, annotations_directory_path=yolo_labels)
 
     # Add txt file
-    txt_path = f"{yolo_dir}\\classes.txt"
+    txt_path = f"{yolo_dir}/classes.txt"
 
     with open(txt_path, "w") as file:
         for string in classes:
@@ -433,6 +438,10 @@ def main():
                         default=1,
                         help="Season number.")
 
+    parser.add_argument("-epsilon", type=int,
+                        default=100,
+                        help="Epsilon value to be used for OPTICS clustering")
+
 
     args = parser.parse_args()
 
@@ -440,21 +449,22 @@ def main():
     season_num = args.season_num
     input_csv = args.csv
     num_samples = args.num_samples
+    epsilon = args.epsilon
 
-    image_dir = f"{args.image_dir}\\Season_{season_num}"
-    output_dir = f"{args.output_dir}\\Reduced"
+    image_dir = f"{args.image_dir}/Season_{season_num}"
+    output_dir = f"{args.output_dir}/Reduced"
 
     # Create output csv file
-    output_csv = f"{output_dir}\\reduced_annotations.csv"
+    output_csv = f"{output_dir}/reduced_annotations.csv"
 
     # Make the output directory
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(f"{output_dir}\\Visual_Comparison", exist_ok=True)
-    os.makedirs(f"{output_dir}\\Yolo", exist_ok=True)
+    os.makedirs(f"{output_dir}/Visual_Comparison", exist_ok=True)
+    os.makedirs(f"{output_dir}/Yolo", exist_ok=True)
 
 
     try:
-        group_subjectid(input_csv, num_samples, image_dir, output_dir, output_csv)
+        group_subjectid(input_csv, num_samples, image_dir, output_dir, output_csv, epsilon)
 
         print("Done.")
 
