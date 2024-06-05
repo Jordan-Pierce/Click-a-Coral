@@ -145,10 +145,7 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
                 t2, t1, t0 = annotations[i: i + 3]
 
                 # Loop through individual annotations in t0
-                for j in range(0, len(t0['value'])):
-
-                    # Extract the bounding box
-                    bbox = t0['value'][j]
+                for bbox in t0['value']:
 
                     x = bbox['x']
                     y = bbox['y']
@@ -176,7 +173,7 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
 
             except Exception as e:
                 # There isn't box coordinates, not sure why this happens sometimes?
-                pass
+                print(f"{e} \n There is something wrong with this row.")
 
     # Create a pandas dataframe, save it
     clean_df = pd.DataFrame(clean_df)
@@ -185,7 +182,7 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
     return clean_df, output_csv
 
 
-def plot_samples(df, image_dir, output_dir, num_samples):
+def plot_samples(df, image_dir, output_dir, num_samples, include_legend):
     """
 
     """
@@ -266,7 +263,9 @@ def plot_samples(df, image_dir, output_dir, num_samples):
             edge_patches.append(edge_patch)
 
         # Add legend outside the plot
-        ax.legend(handles=edge_patches, labels=legend_labels, loc='upper left', bbox_to_anchor=(1, 1))
+        if include_legend:
+            # Add legend outside the plot
+            ax.legend(handles=edge_patches, labels=legend_labels, loc='upper left', bbox_to_anchor=(1, 1))
 
         # Save with same name as frame in examples folder
         plt.title(f"Media {media_id} - Frame {frame_name}")
@@ -285,10 +284,6 @@ def main():
     """
     parser = argparse.ArgumentParser(description="Convert Zooniverse Annotations.")
 
-    parser.add_argument("--season_num", type=int,
-                        default=1,
-                        help="Season number.")
-
     parser.add_argument("--workflow_id", type=int,
                         default=26428,
                         help="Workflow ID.")
@@ -301,27 +296,32 @@ def main():
                         help="Path to the input CSV file.")
 
     parser.add_argument("--image_dir", type=str,
+                        default="./Data",
                         help="Path to the image directory.")
 
     parser.add_argument("--label_dir", type=str,
+                        default="./Annotations",
                         help="Path to the label directory.")
 
     parser.add_argument("--num_samples", type=int,
-                        default=0,
+                        default=1,
                         help="Number of samples to plot.")
+
+    parser.add_argument("--legend_flag", action="store_true",
+                        help="Include if user legend should be on the plot")
 
     args = parser.parse_args()
 
-    season_num = args.season_num
+    # Extract args
     workflow_id = args.workflow_id
     version = args.version
-
     num_samples = args.num_samples
+    include_legend = args.legend_flag
 
     # Extract the shapes for the workflow
     input_csv = args.input_csv
-    image_dir = f"{args.image_dir}\\Season_{season_num}"
-    label_dir = f"{args.label_dir}\\Season_{season_num}"
+    image_dir = f"{args.image_dir}"
+    label_dir = f"{args.label_dir}"
     sample_dir = f"{label_dir}\\user_samples"
 
     assert os.path.exists(input_csv), "ERROR: Input CSV provided does not exist"
@@ -330,21 +330,18 @@ def main():
     # Make the label directory
     os.makedirs(sample_dir, exist_ok=True)
 
-    print("Season Number:", season_num)
     print("Workflow ID:", workflow_id)
     print("Version:", version)
     print("Input CSV:", input_csv)
     print("Image Directory:", image_dir)
     print("Label Directory:", label_dir)
-
-    # Clean the classification csv, convert to a dataframe for creating training data (legacy)
-    #df_legacy, path_legacy = clean_csv_file_legacy(input_csv, label_dir)
+    print("Include Legend:", include_legend)
 
     # Clean the classification csv, convert to a dataframe for creating training data
     df, path = clean_csv_file(input_csv, label_dir, workflow_id, version)
 
     # Plot some samples
-    plot_samples(df, image_dir, sample_dir, num_samples)
+    plot_samples(df, image_dir, sample_dir, num_samples, include_legend)
 
 
 if __name__ == "__main__":
