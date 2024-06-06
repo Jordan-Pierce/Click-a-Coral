@@ -1,19 +1,19 @@
-import argparse
+import os
 import sys
 import glob
-import os
+import argparse
 
-import pandas as pd
-import numpy as np
 import math
 import statistics
+import numpy as np
+import pandas as pd
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-from sklearn.cluster import OPTICS
 import cv2
 import supervision as sv
+from sklearn.cluster import OPTICS
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -31,23 +31,22 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
             num_samples (int): The number of media ID folders to sort through
             image_dir (str): The image directory with all the image files
             output_dir (str): The directory in which all transformations should be outputted
-            output_csv (str): The filepath to the reduced annotations csv file
             epsilon (int): The value to determine how far away two points should be to
             declare them as a cluster
-        """
+    """
 
     # Convert CSV to Pandas dataframe
     df = pd.read_csv(input_csv)
     df['Subject ID'] = df['Subject ID'].astype(int)
 
+    # Initialize class labels
+    classes = df['label'].unique().tolist()
+
     # Group by Media ID
     df = df.groupby("Media ID")
 
-    # Initialize count and class labels
+    # Initialize count
     count = 0
-    classes = ['ANTIPATHESFURCATA', 'ANTIPATHESATLANTICA', 'BEBRYCESP', 'MADRACISSP', 'MADREPORASP',
-               'MURICEAPENDULA', 'PARAMURICIADESP', 'SWIFTIAEXSERTA', 'THESEANIVEA']
-
 
     # Create output CSV file for reduced annotations
     output_csv = f"{output_dir}\\reduced_annotations.csv"
@@ -57,7 +56,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
     without_single_csv = f"{output_dir}\\reduced_annotations_no_single_cluster.csv"
 
     # Create CSV file for original annotations
-    original_annotations_csv = f"{output_dir}\\original_annotations.csv"
+    updated_annotations_csv = f"{output_dir}\\extracted_data_w_clusters.csv"
 
     # Loops through Media ID's
     for media_id, media_id_df in df:
@@ -75,33 +74,36 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
             print("Subject Annotations", subject_id_df)
 
             # Get image information
-            image_path, image_name, jpg = get_image(subject_id_df.iloc[0], image_dir)
+            image_path, image_name, image_frame = get_image(subject_id_df.iloc[0], image_dir)
 
             # If Subject ID has only one annotation, skip clustering and reduction
             if len(subject_id_df) > 1:
 
                 # Makes clusters and saves their labels
-                labels = make_clusters(subject_id_df, epsilon, image_path)
+                cluster_labels, centers = make_clusters(subject_id_df, epsilon, image_path)
 
                 # Reduce bounding boxes based on clusters
-                reduced_boxes, original_annotations = reduce_boxes(subject_id_df, labels)
+                reduced_boxes, updated_annotations = reduce_boxes(subject_id_df, cluster_labels, centers)
 
                 #TODO: Note that this is for testing purposes only
                 # Final version should only output ONE reduction
                 # Removes single clusters from reduced boxes
                 no_single_clusters = remove_single_clusters(reduced_boxes)
                 # Save the single cluster annotations
-                save_to_csv(without_single_csv, no_single_clusters)
+                save_to_csv(without_single_csv, no_single_clusters, True)
 
                 #TODO: Note that this is for testing purposes only
                 # Visually compare images with normal reductions to those with removed single clusters
+                # Potentialy move to visualize.py
                 visual_compare(reduced_boxes, no_single_clusters, image_path, output_dir, image_name)
 
                 # Returns original annotations with the distance from reduced bounding box
-                original_annotations = calculate_distance(original_annotations, reduced_boxes)
+                updated_annotations = calculate_distance(updated_annotations, reduced_boxes)
+
+                #TODO: Add cluster center coordinates to updated_annotations
 
                 # Saves original annotations with cluster labels and distance to CSV
-                save_to_csv(original_annotations_csv, original_annotations)
+                save_to_csv(updated_annotations_csv, updated_annotations, False)
 
             else:
 
@@ -111,25 +113,32 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
                 # Add in cluster label
                 reduced_boxes.insert(14, 'clusters', -1)
 
+                # Gets center values
+                center = find_center(reduced_boxes)
+
+                # Add centers to dataframe
+                reduced_boxes.insert(15, "x_center", center['x_center'])
+                reduced_boxes.insert(16, "y_center", center['y_center'])
+
                 # Plot the single annotation
                 plot_boxes(reduced_boxes, image_path, image_name, output_dir)
 
             # Saves reduced annotations to CSV
-            save_to_csv(output_csv, reduced_boxes)
+            save_to_csv(output_csv, reduced_boxes, True)
 
             # Makes a detection based off of the reduced boxes and classes
             detection = make_detection(reduced_boxes, classes)
 
             # Adds detection to dict
-            detections[jpg] = detection
+            detections[image_frame] = detection
 
             # Adds image to dict for YOLO convert
             image = cv2.imread(image_path)
-            images[jpg] = image
+            images[image_frame] = image
 
         # Creates YOLO directories
-        os.makedirs(f"{output_dir}\\Yolo\\{media_id}", exist_ok=True)
         yolo_dir = f"{output_dir}\\Yolo\\{media_id}"
+        os.makedirs(yolo_dir, exist_ok=True)
 
         # Creates Detection Dataset
         ds = sv.DetectionDataset(classes=classes, images=images, annotations=detections)
@@ -140,7 +149,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
         # Checks if Media ID count is over number of samples
         count += 1
         if count == num_samples:
-            sys.exit(1)
+            return
 
 
 def make_clusters(annotations, epsilon, image_path):
@@ -157,8 +166,9 @@ def make_clusters(annotations, epsilon, image_path):
          labels (array): List of all the clustering labels corresponding to the annotations
     """
 
-    # Isolates x, y, width, and height values
-    #annotations = annotations[['x', 'y', 'w', 'h']]
+    #TODO: Look at having boolean value for plotting clusters
+
+    #TODO: Save center values in original annotations
 
     # Finds the center of each annotation bounding box
     centers = find_center(annotations)
@@ -176,7 +186,7 @@ def make_clusters(annotations, epsilon, image_path):
     # Plots the clustering (OPTIONAL)
     #plot_points(array, labels, image_path)
 
-    return labels
+    return labels, centers
 
 
 def find_center(df):
@@ -239,7 +249,7 @@ def plot_points(array, labels, image_path):
     plt.show()
 
 
-def reduce_boxes(annotations, labels):
+def reduce_boxes(annotations, labels, centers):
     """
     This function reduces annotations to the bounding box of "best fit"
 
@@ -255,8 +265,10 @@ def reduce_boxes(annotations, labels):
     # Add clusters as a column
     annotations = annotations.assign(clusters=labels)
 
-    # Adjusts width and height so all bounding boxes are within the image
-    annotations = stay_in_bounds(annotations)
+    # Add centers to the annotations dataframe
+    annotations.reset_index(drop=True, inplace=True)
+    centers.reset_index(drop=True, inplace=True)
+    annotations = pd.concat([annotations, centers], axis=1)
 
     # Group by clusters
     clusters = annotations.groupby('clusters')
@@ -306,42 +318,6 @@ def reduce_boxes(annotations, labels):
     #plot_points(reduced.to_numpy(), reduced.index)
 
     return reduced, annotations
-
-
-def stay_in_bounds(annotations):
-    """
-    This function adjusts the height and width of a bounding box if out of image bounds
-
-    Args:
-        annotations (Pandas dataframe): Annotations to be adjusted
-
-    Returns:
-        annotations (Pandas dataframe): Annotations WITH adjustments
-    """
-
-    # Loop through annotations
-    for i, row in annotations.iterrows():
-
-        # Checks if right corners of bounding box are outside the image width
-        if row['x'] + row['w'] > row['Width']:
-            row['w'] = (row['Width'] - row['x'])
-
-        # Checks if bottom corners of bounding box are outside the image width
-        if row['y'] + row['h'] > row['Height']:
-            row['h'] = (row['Height'] - row['y'])
-
-        # Checks if left corners of bounding box are outside the image width
-        if row['x'] < 0:
-            row['x'] = 0
-
-        # Checks if top corners of bounding box are outside the image width
-        if row['y'] < 0:
-            row['y'] = 0
-
-        # Resets the x, y, w, h values with adjustments
-        annotations.loc[i] = row
-
-    return annotations
 
 
 def remove_single_clusters(df):
@@ -498,17 +474,19 @@ def plot_boxes(df, image_path, image_name, output_dir):
     plt.savefig(f"{output_dir}\\Visual_Comparison\\{image_name}", bbox_inches='tight')
 
 
-def save_to_csv(output_csv, annotations):
+def save_to_csv(output_csv, annotations, column_drop):
     """
     This function saves annotations to a CSV file
 
     Args:
         output_csv (str): Filepath for the output CSV file
         annotations (Pandas dataframe): Annotations to be saved
+        column_drop (bool): Drop additional columns, true or false
     """
 
-    # Get rid of unnecessary information
-    annotations = annotations.drop(columns=['classification_id', 'user_name', 'user_ip', 'created_at', 'retired', 'user_id', 'Unnamed: 0'])
+    if column_drop:
+        # Get rid of unnecessary information
+        annotations = annotations.drop(columns=['classification_id', 'user_name', 'user_ip', 'created_at', 'retired', 'user_id', 'Unnamed: 0'])
 
     # Save the annotations to a csv file
     if os.path.isfile(output_csv):
@@ -675,6 +653,9 @@ def calculate_distance(pre, post):
     # Group original annotations by clusters
     pre_clusters = pre.groupby("clusters")
 
+    # Initialize single clusters
+    single_clusters = pd.DataFrame()
+
     # Loop through the clusters
     for cluster, pre_cluster_df in pre_clusters:
 
@@ -737,10 +718,6 @@ def main():
                         default=1,
                         help="Number of samples to run through")
 
-    parser.add_argument("-season_num", type=int,
-                        default=1,
-                        help="Season number.")
-
     parser.add_argument("-epsilon", type=int,
                         default=100,
                         help="Epsilon value to be used for OPTICS clustering")
@@ -749,13 +726,12 @@ def main():
     args = parser.parse_args()
 
     # Parse out arguments
-    season_num = args.season_num
     input_csv = args.csv
     num_samples = args.num_samples
     epsilon = args.epsilon
 
     # Set directories
-    image_dir = f"{args.image_dir}\\Season_{season_num}"
+    image_dir = args.image_dir
     output_dir = f"{args.output_dir}\\Reduced"
 
     # Make the output directory
