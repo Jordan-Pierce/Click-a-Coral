@@ -126,6 +126,10 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
     # Loop through the dataframe annotations, and restructure it
     clean_df = []
 
+    # Truncate counter
+    truncate_counter = 0
+    point_counter = 0
+
     for i, r in tqdm(df.iterrows()):
 
         # Get the image metadata
@@ -151,6 +155,34 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
                     y = bbox['y']
                     w = bbox['width']
                     h = bbox['height']
+
+                    image_width = subject_data['Width']
+                    image_height = subject_data['Height']
+
+                    # Checks if right corners of bounding box are outside the image width
+                    if x + w > image_width:
+                        w = (image_width - x)
+                        truncate_counter += 1
+
+                    # Checks if bottom corners of bounding box are outside the image width
+                    if y + h > image_height:
+                        h = (image_height - y)
+                        truncate_counter += 1
+
+                    # Checks if left corners of bounding box are outside the image width
+                    if x < 0:
+                        x = 0
+                        truncate_counter += 1
+
+                    # Checks if top corners of bounding box are outside the image width
+                    if y < 0:
+                        y = 0
+                        truncate_counter += 1
+
+                    # Checks if the box is just a singular point or line
+                    if w == 0 or h == 0:
+                        point_counter += 1
+                        continue
 
                     # Extract the label
                     choice = t1['value'][0]
@@ -179,6 +211,8 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
     clean_df = pd.DataFrame(clean_df)
     clean_df.to_csv(output_csv)
 
+    print("truncate", truncate_counter)
+    print("points", point_counter)
     return clean_df, output_csv
 
 
