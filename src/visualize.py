@@ -71,7 +71,7 @@ def compare_accuracy(pre, post, image_path, output_dir, image_name):
 
     # Plot pre on the left subplot
     plt.subplot(1, 2, 1)
-    plt.imshow(image)
+    plt.imshow(image, cmap="RdYlGn")
     for i, r in pre.iterrows():
         # Extract the values of this annotation
         x, y, w, h, d = r[['x', 'y', 'w', 'h', "distance"]]
@@ -91,14 +91,17 @@ def compare_accuracy(pre, post, image_path, output_dir, image_name):
                 bbox=dict(facecolor='black', alpha=0.5))
     plt.title('Pre-aggregation')
 
+    cbar = plt.colorbar(cmap='RdYlGn', location="bottom")
+    cbar.set_label("Accuracy")
+
     # Plot image 2 on the right subplot
     plt.subplot(1, 2, 2)
-    plt.imshow(image)
+    plt.imshow(image, cmap="RdYlGn")
     for i, r in post.iterrows():
         # Extract the values of this annotation
         x, y, w, h = r[['x', 'y', 'w', 'h']]
         # Create the figure
-        rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor='black', facecolor='none')
+        rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor='green', facecolor='none')
         plt.gca().add_patch(rect)
 
         # Plot the class label on the bbox
@@ -107,13 +110,10 @@ def compare_accuracy(pre, post, image_path, output_dir, image_name):
                 r['label'],
                 color='white', fontsize=8,
                 ha='left', va='top',
-                bbox=dict(facecolor='black', alpha=0.5))
+                bbox=dict(facecolor='green', alpha=0.5))
     plt.title('Post aggregation')
 
-    #plt.imshow(image)
-    #plt.show()
-
-    plt.savefig(f"{output_dir}\\Accuracy\\{image_name}", bbox_inches='tight')
+    plt.savefig(f"{output_dir}/Accuracy/{image_name}", bbox_inches='tight')
 
 def compare_pre_post(pre, post, image_path, output_dir, image_name):
 
@@ -170,7 +170,37 @@ def compare_pre_post(pre, post, image_path, output_dir, image_name):
     #plt.imshow(image)
     #plt.show()
 
-    plt.savefig(f"{output_dir}\\User_vs_Reduction\\{image_name}", bbox_inches='tight')
+    plt.savefig(f"{output_dir}/User_vs_Reduction/{image_name}", bbox_inches='tight')
+
+def user_average(input_csv):
+
+    df = pd.read_csv(input_csv)
+
+    users = df.groupby(['user_name'])
+    #users = df.groupby(['user_id'])
+
+    # Initialize empty dataframe
+    user_averages = {}
+    distances = []
+    user_names = sorted(df['user_name'].unique().tolist())
+
+    # Loop through users
+    for user, user_df in users:
+
+        average_distance = user_df['distance'].mean()
+
+        # Add into dictionary
+        user_averages[user] = average_distance
+        distances.append(average_distance)
+
+    print("user averages", user_averages)
+    print("users", user_names)
+    print("distances", distances)
+
+    # Plot the user average
+    plt.bar(user_names, distances)
+
+    plt.show()
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize non-reduced and reduced annotations")
@@ -200,15 +230,17 @@ def main():
     num_samples = args.num_samples
 
     image_dir = args.image_dir
-    output_dir = f"{args.output_dir}\\Visualizations"
+    output_dir = f"{args.output_dir}/Visualizations"
 
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(f"{output_dir}\\User_vs_Reduction", exist_ok=True)
-    os.makedirs(f"{output_dir}\\Accuracy", exist_ok=True)
+    os.makedirs(f"{output_dir}/User_vs_Reduction", exist_ok=True)
+    os.makedirs(f"{output_dir}/Accuracy", exist_ok=True)
 
 
     try:
-        group_annotations(full_csv, reduced_csv, image_dir, num_samples, output_dir)
+        #group_annotations(full_csv, reduced_csv, image_dir, num_samples, output_dir)
+
+        user_average(full_csv)
 
         print("Done.")
 
