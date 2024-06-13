@@ -4,9 +4,11 @@ import glob
 import argparse
 
 import math
+import torch
 import statistics
 import numpy as np
 import pandas as pd
+from torchvision import ops
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -53,7 +55,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
 
     #TODO: Note this is for testing purposes and in the final version only ONE CSV file should be created
     # Create output CSV file for reduced annotations WITHOUT single clusters
-    without_single_csv = f"{output_dir}\\reduced_annotations_no_single_cluster.csv"
+    #without_single_csv = f"{output_dir}\\reduced_annotations_no_single_cluster.csv"
 
     # Create CSV file for original annotations
     updated_annotations_csv = f"{output_dir}\\extracted_data_w_clusters.csv"
@@ -85,44 +87,45 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
                 # Reduce bounding boxes based on clusters
                 reduced_boxes, updated_annotations = reduce_boxes(subject_id_df, cluster_labels, centers)
 
+                reduced_boxes = remove_big_boxers(reduced_boxes)
+
                 #TODO: Note that this is for testing purposes only
                 # Final version should only output ONE reduction
                 # Removes single clusters from reduced boxes
-                no_single_clusters = remove_single_clusters(reduced_boxes)
+                #no_single_clusters = remove_single_clusters(reduced_boxes)
                 # Save the single cluster annotations
-                save_to_csv(without_single_csv, no_single_clusters, True)
+                #save_to_csv(without_single_csv, no_single_clusters, True)
 
                 #TODO: Note that this is for testing purposes only
                 # Visually compare images with normal reductions to those with removed single clusters
                 # Potentialy move to visualize.py
-                visual_compare(reduced_boxes, no_single_clusters, image_path, output_dir, image_name)
+                #visual_compare(reduced_boxes, no_single_clusters, image_path, output_dir, image_name)
 
                 # Returns original annotations with the distance from reduced bounding box
                 updated_annotations = calculate_distance(updated_annotations, reduced_boxes)
-
-                #TODO: Add cluster center coordinates to updated_annotations
 
                 # Saves original annotations with cluster labels and distance to CSV
                 save_to_csv(updated_annotations_csv, updated_annotations, False)
 
             else:
+                continue
+                # # Skips reduction due to a singular annotation
+                # reduced_boxes = subject_id_df
+                #
+                # # Add in cluster label
+                # reduced_boxes.insert(14, 'clusters', -1)
+                #
+                # # Gets center values
+                # center = find_center(reduced_boxes)
+                #
+                # # Add centers to dataframe
+                # reduced_boxes.insert(15, "x_center", center['x_center'])
+                # reduced_boxes.insert(16, "y_center", center['y_center'])
+                #
+                # # Plot the single annotation
+                # #plot_boxes(reduced_boxes, image_path, image_name, output_dir)
 
-                # Skips reduction due to a singular annotation
-                reduced_boxes = subject_id_df
-
-                # Add in cluster label
-                reduced_boxes.insert(14, 'clusters', -1)
-
-                # Gets center values
-                center = find_center(reduced_boxes)
-
-                # Add centers to dataframe
-                reduced_boxes.insert(15, "x_center", center['x_center'])
-                reduced_boxes.insert(16, "y_center", center['y_center'])
-
-                # Plot the single annotation
-                plot_boxes(reduced_boxes, image_path, image_name, output_dir)
-
+            reduced_boxes = remove_single_clusters(reduced_boxes)
             # Saves reduced annotations to CSV
             save_to_csv(output_csv, reduced_boxes, True)
 
@@ -146,10 +149,10 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
         # Converts to YOLO format
         yolo_format(ds, yolo_dir, classes)
 
-        # Checks if Media ID count is over number of samples
-        count += 1
-        if count == num_samples:
-            return
+       #Checks if Media ID count is over number of samples
+        # count += 1
+        # if count == num_samples:
+        #     return
 
 
 def make_clusters(annotations, epsilon, image_path):
@@ -333,6 +336,7 @@ def remove_single_clusters(df):
 
     # Initializes dataframe
     no_single_clusters = pd.DataFrame()
+    count = 0
 
     # Iterates through annotations
     for i, row in df.iterrows():
@@ -341,70 +345,78 @@ def remove_single_clusters(df):
         # This indicates a single cluster
         if row['clusters'] != -1:
             no_single_clusters = no_single_clusters._append(row, ignore_index=True)
+        else:
+            count += 1
 
     return no_single_clusters
 
-# TODO: These functions are currently not in use + may or may not become useful later on
-# def remove_big_boxers(final_bbox):
-#
-#     # iterates through the rows of annotations to find cluster id of -1
-#     for i, row in final_bbox.iterrows():
-#         if row['clusters'] == -1:
-#             # the bbox may be a big boxer
-#             #print("row", row)
-#             percent = total_overlap(row, final_bbox)
-#             print("percent", percent)
-#
-#             # remove boxes that have significant overlap
-#             if percent > 0.25:
-#                 final_bbox.drop(final_bbox.index[i], inplace=True)
-#         else:
-#             continue
-#     print("final", final_bbox)
-#
-#     return final_bbox
-#
-# def total_overlap(box, all_boxes):
-#
-#     total_overlap_area = 0
-#     num_overlaps = 0
-#     total_other_box_area = 0
-#
-#     for i, other_box in all_boxes.iterrows():
-#         # test to see if it's the same as box
-#         # print("other", other_box)
-#         # print("box", box)
-#         if other_box.equals(box):
-#             print("samesies")
-#             continue
-#         else:
-#
-#             # Calculate the coordinates of the intersection rectangle
-#             x1 = max(box['x'], other_box['x'])
-#             y1 = max(box['y'], other_box['y'])
-#             x2 = min(box['x'] + box['w'], other_box['x'] + other_box['w'])
-#             y2 = min(box['y'] + box['h'], other_box['y'] + other_box['h'])
-#
-#             # If the intersection is valid (non-negative area), calculate the area
-#             if x1 < x2 and y1 < y2:
-#                 overlap_area = (x2 - x1) * (y2 - y1)
-#                 num_overlaps += 1
-#                 total_overlap_area += overlap_area
-#
-#                 # total area of the other boxes that are overlapping
-#                 other_box_area = other_box['w'] * other_box['h']
-#                 total_other_box_area += other_box_area
-#
-#     print("overlap area", total_overlap_area)
-#     print("number of overlaps", num_overlaps)
-#
-#     if num_overlaps == 0:
-#         return 0
-#     else:
-#         # calculate percentage
-#         percent = total_overlap_area / total_other_box_area
-#
-#         return percent
+def remove_big_boxers(reduced):
+
+    # Remove single clusters
+    reduced = remove_single_clusters(reduced)
+
+    # Find area for each bounding boxes
+    reduced['area'] = reduced['h'] * reduced['w']
+    print(reduced['h'])
+
+    # Find the mean area
+    mean_area = reduced['area'].mean()
+
+    # Sort dataframe
+    reduced = reduced.sort_values(by='area', ascending=False)
+
+    # Iterates through the rows of annotations to find cluster id of -1
+    for i, row in reduced.iterrows():
+        if row['area'] > mean_area:
+            # The bbox may be a big boxer
+            percent = total_overlap(row, reduced)
+
+            # remove boxes that have significant overlap
+            if percent > 0.3:
+                reduced.drop(i, inplace=True)
+            else:
+                continue
+
+    reduced = remove_single_clusters(reduced)
+    return reduced
+
+def total_overlap(box, all_boxes):
+
+    total_overlap_area = 0
+    num_overlaps = 0
+    #total_other_box_area = 0
+
+    for i, other_box in all_boxes.iterrows():
+        if other_box.equals(box):
+            print("samesies")
+            continue
+        else:
+            # Calculate the coordinates of the intersection rectangle
+            x1 = max(box['x'], other_box['x'])
+            y1 = max(box['y'], other_box['y'])
+            x2 = min(box['x'] + box['w'], other_box['x'] + other_box['w'])
+            y2 = min(box['y'] + box['h'], other_box['y'] + other_box['h'])
+
+            # If the intersection is valid (non-negative area), calculate the area
+            if x1 < x2 and y1 < y2:
+                overlap_area = (x2 - x1) * (y2 - y1)
+                num_overlaps += 1
+                total_overlap_area += overlap_area
+
+                # total area of the other boxes that are overlapping
+                #other_box_area = other_box['w'] * other_box['h']
+                #total_other_box_area += other_box_area
+
+    # print("overlap area", total_overlap_area)
+    # print("number of overlaps", num_overlaps)
+
+    if num_overlaps == 0:
+        return 0
+    else:
+        # calculate percentage
+        percent = total_overlap_area / box['area']
+
+        return percent
 
 
 def get_image(row, image_dir):
@@ -658,7 +670,6 @@ def calculate_distance(pre, post):
 
     # Loop through the clusters
     for cluster, pre_cluster_df in pre_clusters:
-
         # Skip for single clusters
         if cluster == -1:
             single_clusters = pre_cluster_df
@@ -668,30 +679,74 @@ def calculate_distance(pre, post):
 
             # Initialize distance array
             dist_array = []
+            label_array = []
+            iou_array = []
 
             # Find the centers of the reduced boxes that share the same cluster ID
             reduced_box = post.loc[post['clusters'] == cluster]
-            reduced_box_center = find_center(reduced_box)
-            reduced_box_center = (int(reduced_box_center['x_center']), int(reduced_box_center['y_center']))
+            if reduced_box.empty:
+                pre_cluster_df['clusters'] = -1
+                single_clusters = pd.concat([single_clusters, pre_cluster_df], ignore_index=True)
+                continue
+            else:
 
-            # Find the center values for each box in the original annotations
-            cluster_centers = find_center(pre_cluster_df)
+                # Get the dimensions for the reduced box
+                x1 = reduced_box.iloc[0]['x']
+                y1 = reduced_box.iloc[0]['y']
+                x2 = x1 + reduced_box.iloc[0]['w']
+                y2 = y1 + reduced_box.iloc[0]['h']
 
-            # Loop through the centers for each original annotation
-            for i, cluster_center in cluster_centers.iterrows():
-                cluster_center = (int(cluster_center['x_center']), int(cluster_center['y_center']))
+                reduced_dimensions = torch.tensor([[x1, y1, x2, y2]], dtype=torch.float)
 
-                # Find the distance between the 'best fit' box and an original annotation
-                distance = math.dist(reduced_box_center, cluster_center)
+                reduced_box_center = find_center(reduced_box)
+                reduced_box_center = (int(reduced_box_center['x_center']), int(reduced_box_center['y_center']))
+                reduced_box_label = reduced_box.iloc[0]['label']
 
-                # Add to distance array
-                dist_array.append(distance)
+                # Find the center values for each box in the original annotations
+                cluster_centers = find_center(pre_cluster_df)
 
-            # Add distance array as a column to the cluster
-            pre_cluster_df = pre_cluster_df.assign(distance=dist_array)
+                # Loop through the centers for each original annotation
+                for i, cluster_center in cluster_centers.iterrows():
+                    cluster_center = (int(cluster_center['x_center']), int(cluster_center['y_center']))
+                    # Find the distance between the 'best fit' box and an original annotation
+                    distance = math.dist(reduced_box_center, cluster_center)
 
-            # Add directly to original annotations
-            annotations_with_distance = pd.concat([annotations_with_distance, pre_cluster_df], ignore_index=True)
+                    # Add to distance array
+                    dist_array.append(distance)
+
+                    # Annotation label
+                    label = pre_cluster_df.iloc[i]['label']
+
+                    if label == reduced_box_label:
+                        label_array.append('Y')
+                    else:
+                        label_array.append('N')
+
+
+                    box = pre_cluster_df.iloc[i]
+
+                    # Get the dimensions for the reduced box
+                    x1 = box['x']
+                    y1 = box['y']
+                    x2 = x1 + box['w']
+                    y2 = y1 + box['h']
+
+                    box_dimensions = torch.tensor([[x1, y1, x2, y2]], dtype=torch.float)
+
+                    # Get the IoU
+                    iou = ops.box_iou(reduced_dimensions, box_dimensions)
+                    iou = iou.item()
+
+                    # Add to iou array
+                    iou_array.append(iou)
+
+                # Add distance array as a column to the cluster
+                pre_cluster_df = pre_cluster_df.assign(distance=dist_array)
+                pre_cluster_df = pre_cluster_df.assign(correct_label=label_array)
+                pre_cluster_df = pre_cluster_df.assign(iou=iou_array)
+
+                # Add directly to original annotations
+                annotations_with_distance = pd.concat([annotations_with_distance, pre_cluster_df], ignore_index=True)
 
     # Add back the single clusters to the original annotations
     annotations_with_distance = pd.concat([annotations_with_distance, single_clusters], ignore_index=True)
@@ -706,12 +761,15 @@ def main():
     parser = argparse.ArgumentParser(description="Reduce annotations for an image frame")
 
     parser.add_argument("-csv", type=str,
+                        #default="./Annotations/extracted_data.csv",
                         help="Input CSV file")
 
     parser.add_argument("-image_dir", type=str,
+                        default="./Data",
                         help="The image directory")
 
     parser.add_argument("-output_dir", type=str,
+                        default="./ALL",
                          help="Output directory")
 
     parser.add_argument("-num_samples", type=int,
@@ -719,7 +777,7 @@ def main():
                         help="Number of samples to run through")
 
     parser.add_argument("-epsilon", type=int,
-                        default=100,
+                        default=70,
                         help="Epsilon value to be used for OPTICS clustering")
 
 
