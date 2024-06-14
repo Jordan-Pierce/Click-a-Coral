@@ -71,6 +71,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
         subject_ids = media_id_df.groupby("Subject ID")
 
         # Loops through Subject ID's
+
         for subject_id, subject_id_df in subject_ids:
             print("SubjectID", subject_id)
             print("Subject Annotations", subject_id_df)
@@ -125,9 +126,12 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
                 # # Plot the single annotation
                 # #plot_boxes(reduced_boxes, image_path, image_name, output_dir)
 
-            reduced_boxes = remove_single_clusters(reduced_boxes)
+            #reduced_boxes = remove_single_clusters(reduced_boxes)
             # Saves reduced annotations to CSV
-            save_to_csv(output_csv, reduced_boxes, True)
+            if reduced_boxes is None:
+                continue
+            else:
+                save_to_csv(output_csv, reduced_boxes, True)
 
             # Makes a detection based off of the reduced boxes and classes
             detection = make_detection(reduced_boxes, classes)
@@ -355,9 +359,12 @@ def remove_big_boxers(reduced):
     # Remove single clusters
     reduced = remove_single_clusters(reduced)
 
+    # Check if there is nothing in reduced
+    if reduced.empty:
+        return
+
     # Find area for each bounding boxes
     reduced['area'] = reduced['h'] * reduced['w']
-    print(reduced['h'])
 
     # Find the mean area
     mean_area = reduced['area'].mean()
@@ -388,7 +395,6 @@ def total_overlap(box, all_boxes):
 
     for i, other_box in all_boxes.iterrows():
         if other_box.equals(box):
-            print("samesies")
             continue
         else:
             # Calculate the coordinates of the intersection rectangle
@@ -402,13 +408,6 @@ def total_overlap(box, all_boxes):
                 overlap_area = (x2 - x1) * (y2 - y1)
                 num_overlaps += 1
                 total_overlap_area += overlap_area
-
-                # total area of the other boxes that are overlapping
-                #other_box_area = other_box['w'] * other_box['h']
-                #total_other_box_area += other_box_area
-
-    # print("overlap area", total_overlap_area)
-    # print("number of overlaps", num_overlaps)
 
     if num_overlaps == 0:
         return 0
@@ -699,7 +698,7 @@ def calculate_distance(pre, post):
                 reduced_dimensions = torch.tensor([[x1, y1, x2, y2]], dtype=torch.float)
 
                 reduced_box_center = find_center(reduced_box)
-                reduced_box_center = (int(reduced_box_center['x_center']), int(reduced_box_center['y_center']))
+                reduced_box_center = (reduced_box_center.iloc[0]['x_center'], reduced_box_center.iloc[0]['y_center'])
                 reduced_box_label = reduced_box.iloc[0]['label']
 
                 # Find the center values for each box in the original annotations
@@ -707,7 +706,7 @@ def calculate_distance(pre, post):
 
                 # Loop through the centers for each original annotation
                 for i, cluster_center in cluster_centers.iterrows():
-                    cluster_center = (int(cluster_center['x_center']), int(cluster_center['y_center']))
+                    cluster_center = (cluster_center['x_center'], cluster_center['y_center'])
                     # Find the distance between the 'best fit' box and an original annotation
                     distance = math.dist(reduced_box_center, cluster_center)
 
