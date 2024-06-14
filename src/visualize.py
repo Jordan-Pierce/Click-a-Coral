@@ -3,6 +3,7 @@ import argparse
 
 import numpy as np
 import pandas as pd
+from datetime import datetime as dt
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -21,7 +22,7 @@ def group_annotations(pre, post, image_dir, num_samples, output_dir, user):
          pre (Pandas dataframe): The dataframe containing all the original annotations
          post (Pandas dataframe): The dataframe containing the reduced annotations
          image_dir (str): The filepath to the image directory
-         num_samples (int): The number of images/subject IDs to run through
+         num_samples (int): The number of images/subject IDs to run through (soon to be irrelevant)
          output_dir (str): The filepath to the output directory
          user (bool): Whether a user has been provided in the arguments
     """
@@ -35,6 +36,9 @@ def group_annotations(pre, post, image_dir, num_samples, output_dir, user):
     post = post.groupby("Subject ID")
 
     count = 0
+
+    # Initialize the total amount of time spent on the annotations
+    total_duration = pd.Timedelta(0, unit='s')
 
     # Loop through the subject IDs in the original annotations
     for subjectid, subjectid_df in pre:
@@ -53,6 +57,13 @@ def group_annotations(pre, post, image_dir, num_samples, output_dir, user):
 
         # Compare the accuracy of original annotations to reduction
         compare_accuracy(subjectid_df, post_subjectid, image_path, output_dir, image_name)
+
+        # Get the amount of time spent on one image
+        time = get_time_duration(subjectid_df.iloc[0])
+        total_duration += time
+
+    print(total_duration)
+    return total_duration
 
         # Checks if it is over the number of samples
         # count += 1
@@ -144,14 +155,24 @@ def compare_accuracy(pre, post, image_path, output_dir, image_name):
     plt.savefig(f"{output_dir}\\Accuracy\\{image_name}", bbox_inches='tight')
 
 def compare_pre_post(pre, post, image_path, output_dir, image_name, user):
+    """
+    Plots all the user annotations on the left and the reduced annotations on the right.
+
+    Args:
+        pre (Pandas dataframe): The original annotation dataframe
+        post (Pandas dataframe: The reduced annotation dataframe
+        image_path (str): A path to the image
+        output_dir (str): The filepath to the output directory
+        image_name (str): What the image should be saved as
+        user (bool): Whether a user has been given or not
+    """
 
     # Get a color mapping for all the users first
     usernames = pre['user_name'].unique().tolist()
     color_codes = {username: tuple(np.random.rand(3, )) for username in usernames}
 
-    image = plt.imread(image_path)
-
     # Plot the images side by side
+    image = plt.imread(image_path)
     plt.figure(figsize=(20, 10))
 
     # Plot pre on the left subplot
@@ -161,6 +182,7 @@ def compare_pre_post(pre, post, image_path, output_dir, image_name, user):
         # Extract the values of this annotation
         x, y, w, h = r[['x', 'y', 'w', 'h']]
 
+        # Check if a user has been provided
         if user:
             edge_color = "red"
         else:
@@ -200,12 +222,19 @@ def compare_pre_post(pre, post, image_path, output_dir, image_name, user):
                 bbox=dict(facecolor='green', alpha=0.5))
     plt.title('Reduced annotations')
 
-    #plt.imshow(image)
-    #plt.show()
-
+    # Save the figure
     plt.savefig(f"{output_dir}\\User_vs_Reduction\\{image_name}", bbox_inches='tight')
 
+#TODO: This function needs to be edited + workshopped
 def user_average(df, output_dir):
+    """
+    This function plots some basic visualizations for seeing the relationship between number of annotations and
+    accuracy, and accuracy and user
+
+    Args:
+        df (Pandas dataframe): The original dataframe
+        output_dir (str): The filepath to the output directory
+    """
 
     # Remove single clusters (OPTIONAL)
     df = remove_single_clusters(df)
@@ -266,6 +295,16 @@ def user_average(df, output_dir):
 
 
 def user_information(reduced, original, user, image_dir, output_dir):
+    """
+    This function provides plots and information regarding a specific user
+
+    Args:
+        reduced (Pandas dataframe): The reduced annotation dataframe
+        original (Pandas dataframe): The original user annotation dataframe
+        user (str): The user's name
+        image_dir (str): The filepath to the image directory
+        output_dir (str): The filepath to the output directory
+    """
 
     # Remove single clusters from the reduced annotations
     reduced = remove_single_clusters(reduced)
@@ -279,33 +318,6 @@ def user_information(reduced, original, user, image_dir, output_dir):
 
     # Find the reduced annotations that correspond to the users
     reduced_subset = reduced[reduced['Subject ID'].isin(subjectids)]
-
-    #TODO: This "gets" how much time the user spent annotating but either need
-    # a better way to do this, or not do it at all
-
-    # subset['created_at'] = pd.to_datetime(subset['created_at']).dt.tz_convert(None)
-    #
-    # print(subset)
-    # dates = subset.groupby(subset['created_at'].dt.date)
-    #
-    # total_duration = pd.Timedelta(0, unit='s')
-    # annotation_number = len(subset)
-    #
-    # for date, date_df in dates:
-    #     print(date, date_df)
-    #
-    #     times = date_df['created_at'].unique().tolist()
-    #     times = sorted(times)
-    #     print(times)
-    #
-    #     # Get duration
-    #     if len(times) > 1:
-    #         duration = times[-1] - times[0]
-    #         print(duration)
-    #
-    #         total_duration += duration
-    #
-    # print(total_duration)
 
     # Set output directory for the user
     output_dir = f"{output_dir}\\{user}"
@@ -345,6 +357,30 @@ def user_information(reduced, original, user, image_dir, output_dir):
     # Save the plot
     plt.savefig(f"{output_dir}\\distance_distribution.jpg", bbox_inches='tight')
 
+
+def get_time_duration(annotation):
+    """
+    This function gets the duration of time a user spent on an image.
+
+    Args:
+        annotation (Pandas dataframe row): The first annotation for an image by a user
+
+    Returns:
+        duration (Datetime object): The duration of time spent on the image
+    """
+
+    # Get the start and end time for the image
+    start_time = annotation['started_at']
+    end_time = annotation['finished_at']
+
+    # Convert into datetime objects
+    start_time = dt.strptime(start_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+    end_time = dt.strptime(end_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+
+    # Find the total duration
+    duration = end_time - start_time
+
+    return duration
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize non-reduced and reduced annotations")
