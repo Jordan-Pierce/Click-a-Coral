@@ -138,6 +138,15 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
         subject_data = subject_data[subject_id]
         subject_data['Subject ID'] = subject_id
 
+        # Get the image start and end time
+        meta_data = json.loads(r['metadata'])
+        start_time = meta_data['started_at']
+        end_time = meta_data['finished_at']
+
+        # Add to subject_data
+        subject_data['started_at'] = start_time
+        subject_data['finished_at'] = end_time
+
         # Convert from string to list of dicts
         # Get all but the last one, since last is NULL
         annotations = json.loads(r['annotations'])[:-1]
@@ -211,8 +220,6 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
     clean_df = pd.DataFrame(clean_df)
     clean_df.to_csv(output_csv)
 
-    print("truncate", truncate_counter)
-    print("points", point_counter)
     return clean_df, output_csv
 
 
