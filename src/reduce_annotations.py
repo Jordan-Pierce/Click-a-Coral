@@ -1,17 +1,15 @@
 import os
-import sys
 import glob
 import argparse
 
 import math
-import torch
 import statistics
 import numpy as np
 import pandas as pd
-from torchvision import ops
 
+import torch
+from torchvision import ops
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 
 import cv2
 import supervision as sv
@@ -22,7 +20,7 @@ from sklearn.cluster import OPTICS
 # Functions
 # ----------------------------------------------------------------------------------------------------------------------
 
-def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
+def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cluster_plot_flag):
     """
         This function groups annotations in a dataframe according to their media ID and then
         subject ID. It also calls the other functions to reduce and save the annotations, as
@@ -35,6 +33,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
             output_dir (str): The directory in which all transformations should be outputted
             epsilon (int): The value to determine how far away two points should be to
             declare them as a cluster
+            cluster_plot_flag (bool): Whether the cluster plots should be saved
     """
 
     # Convert CSV to Pandas dataframe
@@ -47,18 +46,15 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
     # Group by Media ID
     df = df.groupby("Media ID")
 
+    # TODO: This will need to be gotten rid of
     # Initialize count
-    count = 0
+    #count = 0
 
     # Create output CSV file for reduced annotations
     output_csv = f"{output_dir}\\reduced_annotations.csv"
 
-    #TODO: Note this is for testing purposes and in the final version only ONE CSV file should be created
-    # Create output CSV file for reduced annotations WITHOUT single clusters
-    #without_single_csv = f"{output_dir}\\reduced_annotations_no_single_cluster.csv"
-
     # Create CSV file for original annotations
-    updated_annotations_csv = f"{output_dir}\\extracted_data_w_clusters.csv"
+    updated_annotations_csv = f"{output_dir}\\extracted_data_w_additional.csv"
 
     # Loops through Media ID's
     for media_id, media_id_df in df:
@@ -71,7 +67,6 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
         subject_ids = media_id_df.groupby("Subject ID")
 
         # Loops through Subject ID's
-
         for subject_id, subject_id_df in subject_ids:
             print("SubjectID", subject_id)
             print("Subject Annotations", subject_id_df)
@@ -83,83 +78,64 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon):
             if len(subject_id_df) > 1:
 
                 # Makes clusters and saves their labels
-                cluster_labels, centers = make_clusters(subject_id_df, epsilon, image_path)
+                cluster_labels, centers = make_clusters(subject_id_df, epsilon, image_path, cluster_plot_flag, output_dir, image_name)
 
                 # Reduce bounding boxes based on clusters
                 reduced_boxes, updated_annotations = reduce_boxes(subject_id_df, cluster_labels, centers)
 
+                # Remove single clusters
+                reduced_boxes = remove_single_clusters(reduced_boxes)
+
+                # Remove big boxers
                 reduced_boxes = remove_big_boxers(reduced_boxes)
 
-                #TODO: Note that this is for testing purposes only
-                # Final version should only output ONE reduction
-                # Removes single clusters from reduced boxes
-                #no_single_clusters = remove_single_clusters(reduced_boxes)
-                # Save the single cluster annotations
-                #save_to_csv(without_single_csv, no_single_clusters, True)
-
-                #TODO: Note that this is for testing purposes only
-                # Visually compare images with normal reductions to those with removed single clusters
-                # Potentialy move to visualize.py
-                #visual_compare(reduced_boxes, no_single_clusters, image_path, output_dir, image_name)
-
-                # Returns original annotations with the distance from reduced bounding box
-                updated_annotations = calculate_distance(updated_annotations, reduced_boxes)
+                # Returns original annotations updated
+                updated_annotations = update_annotations(updated_annotations, reduced_boxes)
 
                 # Saves original annotations with cluster labels and distance to CSV
                 save_to_csv(updated_annotations_csv, updated_annotations, False)
 
+                if reduced_boxes is None:
+                    continue
+                else:
+                    # Saves reduced annotations
+                    save_to_csv(output_csv, reduced_boxes, True)
+
+                    # Makes a detection based off of the reduced boxes and classes
+                    detection = make_detection(reduced_boxes, classes)
+
+                    # Adds detection to dict
+                    detections[image_frame] = detection
+
+                    # Adds image to dict for YOLO convert
+                    image = cv2.imread(image_path)
+                    images[image_frame] = image
+
             else:
                 continue
-                # # Skips reduction due to a singular annotation
-                # reduced_boxes = subject_id_df
-                #
-                # # Add in cluster label
-                # reduced_boxes.insert(14, 'clusters', -1)
-                #
-                # # Gets center values
-                # center = find_center(reduced_boxes)
-                #
-                # # Add centers to dataframe
-                # reduced_boxes.insert(15, "x_center", center['x_center'])
-                # reduced_boxes.insert(16, "y_center", center['y_center'])
-                #
-                # # Plot the single annotation
-                # #plot_boxes(reduced_boxes, image_path, image_name, output_dir)
 
-            #reduced_boxes = remove_single_clusters(reduced_boxes)
-            # Saves reduced annotations to CSV
-            if reduced_boxes is None:
-                continue
-            else:
-                save_to_csv(output_csv, reduced_boxes, True)
+        # Checks to see if there are images in media folder
+        if not images:
+            continue
+        else:
+            # Creates YOLO directories
+            yolo_dir = f"{output_dir}\\Yolo\\{media_id}"
+            os.makedirs(yolo_dir, exist_ok=True)
 
-            # Makes a detection based off of the reduced boxes and classes
-            detection = make_detection(reduced_boxes, classes)
+            # Creates Detection Dataset
+            ds = sv.DetectionDataset(classes=classes, images=images, annotations=detections)
 
-            # Adds detection to dict
-            detections[image_frame] = detection
+            # Converts to YOLO format
+            yolo_format(ds, yolo_dir, classes)
 
-            # Adds image to dict for YOLO convert
-            image = cv2.imread(image_path)
-            images[image_frame] = image
-
-        # Creates YOLO directories
-        yolo_dir = f"{output_dir}\\Yolo\\{media_id}"
-        os.makedirs(yolo_dir, exist_ok=True)
-
-        # Creates Detection Dataset
-        ds = sv.DetectionDataset(classes=classes, images=images, annotations=detections)
-
-        # Converts to YOLO format
-        yolo_format(ds, yolo_dir, classes)
-
+        #TODO: This will be deleted
        #Checks if Media ID count is over number of samples
         # count += 1
         # if count == num_samples:
         #     return
 
 
-def make_clusters(annotations, epsilon, image_path):
+def make_clusters(annotations, epsilon, image_path, flag, output_dir, image_name):
     """
     This function clusters annotations based on the OPTICS clustering algorithm.
 
@@ -168,14 +144,14 @@ def make_clusters(annotations, epsilon, image_path):
         epsilon (int): Threshold value for how far apart points should be to consider
         them a cluster
         image_path (str): Path to the image corresponding to a subject ID
+        flag (bool): Whether the cluster plots should be saved
+        output_dir (str): The path to the output directory for the cluster plots
+        image_name (str): What the cluster plot should be named
 
     Returns:
          labels (array): List of all the clustering labels corresponding to the annotations
+         centers (Pandas dataframe): Dataframe containing the center points for the annotations
     """
-
-    #TODO: Look at having boolean value for plotting clusters
-
-    #TODO: Save center values in original annotations
 
     # Finds the center of each annotation bounding box
     centers = find_center(annotations)
@@ -190,8 +166,9 @@ def make_clusters(annotations, epsilon, image_path):
     # Saves the clustering labels
     labels = clust.labels_
 
-    # Plots the clustering (OPTIONAL)
-    #plot_points(array, labels, image_path)
+    # Plots the clustering
+    if flag:
+        plot_points(array, labels, image_path, output_dir, image_name)
 
     return labels, centers
 
@@ -227,7 +204,7 @@ def find_center(df):
     return centers
 
 
-def plot_points(array, labels, image_path):
+def plot_points(array, labels, image_path, output_dir, image_name):
     """
     This is a helper function to plot cluster points on an image
 
@@ -235,7 +212,10 @@ def plot_points(array, labels, image_path):
         array (array): Array of points to be plotted
         labels (array): Labels that correspond to the points
         image_path (str): Filepath to the image
+        output_dir (str): Path to where the plots should be saved
+        image_name (str): What the plot should be called
     """
+
     # Open the image
     image = plt.imread(image_path)
 
@@ -248,12 +228,14 @@ def plot_points(array, labels, image_path):
     # Add a legend and title
     legend1 = plt.legend(*scatter.legend_elements(), title="Clusters")
     plt.gca().add_artist(legend1)
-    plt.title('OPTICS Clustering')
+    plt.title(f'OPTICS Clustering for {image_name}')
 
     # Plot and show the figure
     plt.grid(True)
     plt.imshow(image)
-    plt.show()
+
+    # Save the cluster plot
+    plt.savefig(f"{output_dir}\\Cluster Plots\\{image_name}", bbox_inches='tight')
 
 
 def reduce_boxes(annotations, labels, centers):
@@ -263,6 +245,7 @@ def reduce_boxes(annotations, labels, centers):
     Args:
         annotations (Pandas dataframe): The original annotations to be reduced
         labels (array): Clustering labels
+        centers (Pandas dataframe): The center points for the annotations
 
     Return:
         reduced (Pandas dataframe): Reduced annotations
@@ -321,9 +304,6 @@ def reduce_boxes(annotations, labels, centers):
             # Add best-fit bounding box to reduced dataframe
             reduced = pd.concat([new_row, reduced], ignore_index=True)
 
-    # Plot the reduced clustering (OPTIONAL)
-    #plot_points(reduced.to_numpy(), reduced.index)
-
     return reduced, annotations
 
 
@@ -354,12 +334,19 @@ def remove_single_clusters(df):
 
     return no_single_clusters
 
+
 def remove_big_boxers(reduced):
+    """
+    This function removes big boxer annotations from the reduced dataframe.
 
-    # Remove single clusters
-    reduced = remove_single_clusters(reduced)
+    Args:
+        reduced (Pandas dataframe): The reduced annotation dataframe
 
-    # Check if there is nothing in reduced
+    Returns:
+        reduced (Pandas dataframe): The reduced annotation dataframe without big boxers
+    """
+
+    # Check if reduced is empty
     if reduced.empty:
         return
 
@@ -369,33 +356,48 @@ def remove_big_boxers(reduced):
     # Find the mean area
     mean_area = reduced['area'].mean()
 
-    # Sort dataframe
+    # Sort dataframe by area
     reduced = reduced.sort_values(by='area', ascending=False)
 
     # Iterates through the rows of annotations to find cluster id of -1
     for i, row in reduced.iterrows():
         if row['area'] > mean_area:
+
             # The bbox may be a big boxer
             percent = total_overlap(row, reduced)
 
-            # remove boxes that have significant overlap
+            # Remove boxes that have significant overlap
             if percent > 0.3:
-                reduced.drop(i, inplace=True)
+                reduced = reduced.drop(i)
             else:
                 continue
 
-    reduced = remove_single_clusters(reduced)
     return reduced
 
-def total_overlap(box, all_boxes):
 
+def total_overlap(box, all_boxes):
+    """
+    This function finds the total area of overlap that a box has with all other boxes in the image.
+
+    Args:
+        box (Pandas dataframe): The annotation that is being analyzed for an image
+        all_boxes (Pandas dataframe): All the annotations in an image
+
+    Returns:
+        percent (int): The amount of overlap between one box and all the other boxes in an image
+    """
+
+    # Initialize variables
     total_overlap_area = 0
     num_overlaps = 0
-    #total_other_box_area = 0
 
+    # Loop through all boxes in an image
     for i, other_box in all_boxes.iterrows():
+
+        # Check to see if it is the same box
         if other_box.equals(box):
             continue
+
         else:
             # Calculate the coordinates of the intersection rectangle
             x1 = max(box['x'], other_box['x'])
@@ -409,10 +411,12 @@ def total_overlap(box, all_boxes):
                 num_overlaps += 1
                 total_overlap_area += overlap_area
 
+    # Check if the box intersects with any other boxes
     if num_overlaps == 0:
         return 0
+
     else:
-        # calculate percentage
+        # Calculate percentage
         percent = total_overlap_area / box['area']
 
         return percent
@@ -447,44 +451,6 @@ def get_image(row, image_dir):
     return frame_path, image_name, frame_name
 
 
-def plot_boxes(df, image_path, image_name, output_dir):
-    """
-    This function plots the reduced annotations onto the image
-
-    Args:
-        df (Pandas dataframe): Reduced annotation dataframe
-        image_path (str): The filepath for the image
-        image_name (str): The name for the outputted image
-        output_dir (str): Path to the output directory and where to save the image
-    """
-
-    # Open image
-    image = plt.imread(image_path)
-
-    # Loop through rows in dataframe
-    for i, r in df.iterrows():
-
-        # Extract the values of this annotation
-        x, y, w, h = r[['x', 'y', 'w', 'h']]
-
-        # Plot the boxes
-        rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor='black', facecolor='none')
-        plt.gca().add_patch(rect)
-
-        # Plot the class label on the bbox
-        plt.text(x + w * 0.02,
-                y + h * 0.98,
-                r['label'],
-                color='white', fontsize=8,
-                ha='left', va='top',
-                bbox=dict(facecolor='black', alpha=0.5))
-
-    # Plot and save the image
-    plt.title(f"{image_name}")
-    plt.imshow(image)
-    plt.savefig(f"{output_dir}\\Visual_Comparison\\{image_name}", bbox_inches='tight')
-
-
 def save_to_csv(output_csv, annotations, column_drop):
     """
     This function saves annotations to a CSV file
@@ -495,6 +461,11 @@ def save_to_csv(output_csv, annotations, column_drop):
         column_drop (bool): Drop additional columns, true or false
     """
 
+    # Checks if there are no annotations
+    if annotations is None:
+        return
+
+    # Checks if these columns need to be dropped
     if column_drop:
         # Get rid of unnecessary information
         annotations = annotations.drop(columns=['classification_id', 'user_name', 'user_ip', 'created_at', 'retired', 'user_id', 'Unnamed: 0'])
@@ -506,79 +477,9 @@ def save_to_csv(output_csv, annotations, column_drop):
         annotations.to_csv(output_csv, index=False)
 
 
-def visual_compare(annotations1, annotations2, image_path, output_dir, image_name):
-    """
-    This function creates a side by side plot to compare two sets of annotations. Note that this function was
-    originally created to compare annotations with and without single clusters.
-
-    Args:
-        annotations1 (Pandas dataframe): The first set of annotations to be compared--with single clustering
-        annotations2 (Pandas dataframe): The second set of annotations to be compared--without single clustering
-        image_path (str): The filepath to the image
-        output_dir (str): The path to the output directory
-        image_name (str): The name of the image
-    """
-
-    # Open image
-    image = plt.imread(image_path)
-
-    # Create figure size and title
-    plt.figure(figsize=(13, 7))
-    plt.title(f"{image_name}")
-
-    # Plot annotations1 on the left subplot
-    plt.subplot(1, 2, 1)
-    plt.imshow(image)
-
-    # Loop through annotations
-    for i, r in annotations1.iterrows():
-
-        # Extract the values of this annotation
-        x, y, w, h = r[['x', 'y', 'w', 'h']]
-
-        # Create and plot bounding boxes
-        rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor='black', facecolor='none')
-        plt.gca().add_patch(rect)
-
-        # Plot the class label on the bbox
-        plt.text(x + w * 0.02,
-                y + h * 0.98,
-                r['label'],
-                color='white', fontsize=8,
-                ha='left', va='top',
-                bbox=dict(facecolor='black', alpha=0.5))
-    plt.title('With Single Clusters')
-
-    # Plot annotations2 on the right subplot
-    plt.subplot(1, 2, 2)
-    plt.imshow(image)
-
-    # Loop through annotations
-    for i, r in annotations2.iterrows():
-
-        # Extract the values of this annotation
-        x, y, w, h = r[['x', 'y', 'w', 'h']]
-
-        # Create and plot bounding boxes
-        rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor='black', facecolor='none')
-        plt.gca().add_patch(rect)
-
-        # Plot the class label on the bbox
-        plt.text(x + w * 0.02,
-                y + h * 0.98,
-                r['label'],
-                color='white', fontsize=8,
-                ha='left', va='top',
-                bbox=dict(facecolor='black', alpha=0.5))
-    plt.title('Without Single Clusters')
-
-    # Save the plot
-    plt.savefig(f"{output_dir}\\Visual_Comparison\\{image_name}", bbox_inches='tight')
-
-
 def make_detection(annotations, class_labels):
     """
-    This function makes a detection for an image
+    This function makes a detection for an image.
 
     Args:
         annotations (Pandas dataframe): Reduced annotations for an image
@@ -587,6 +488,9 @@ def make_detection(annotations, class_labels):
     Returns:
         detection (Detection): Detection dataclass for an image
     """
+
+    # Resets index for annotations
+    annotations.reset_index(inplace=True)
 
     # Initializes arrays for bounding boxes and classes
     xyxy = np.empty((len(annotations), 4))
@@ -622,7 +526,7 @@ def make_detection(annotations, class_labels):
 
 def yolo_format(ds, yolo_dir, classes):
     """
-    This function converts a DetectionDataset into YOLO format
+    This function converts a DetectionDataset into YOLO format.
 
     Args:
         ds (DetectionDataset): A DetectionDataset for a single Media ID
@@ -646,20 +550,22 @@ def yolo_format(ds, yolo_dir, classes):
             file.write(string + "\n")
 
 
-def calculate_distance(pre, post):
+def update_annotations(pre, post):
     """
-    This function calculates the distance between the original annotation and the "best fit" annotation
+    This function adds additional columns to the original user annotation dataframe, including the distance from the
+    reduced box, the IoU of the original annotation and reduced box, the center point of the bounding box, and whether
+    the classification label of the original annotation is correct.
 
     Args:
         pre (Pandas dataframe): Dataframe with original annotations
         post (Pandas dataframe): Dataframe with reduced annotations
 
     Returns:
-        annotations_with_distance (Pandas dataframe): The original annotations with the distance from reduced boxes
+        updated_annotations (Pandas dataframe): The updated original annotations
     """
 
     # Initialize dataframe
-    annotations_with_distance = pd.DataFrame()
+    updated_annotations = pd.DataFrame()
 
     # Group original annotations by clusters
     pre_clusters = pre.groupby("clusters")
@@ -676,13 +582,15 @@ def calculate_distance(pre, post):
 
         else:
 
-            # Initialize distance array
+            # Initialize arrays
             dist_array = []
             label_array = []
             iou_array = []
 
             # Find the centers of the reduced boxes that share the same cluster ID
             reduced_box = post.loc[post['clusters'] == cluster]
+
+            # If there is no reduced box that matches -> add it to the single clusters
             if reduced_box.empty:
                 pre_cluster_df['clusters'] = -1
                 single_clusters = pd.concat([single_clusters, pre_cluster_df], ignore_index=True)
@@ -697,6 +605,7 @@ def calculate_distance(pre, post):
 
                 reduced_dimensions = torch.tensor([[x1, y1, x2, y2]], dtype=torch.float)
 
+                # Find the center point and label for reduced box
                 reduced_box_center = find_center(reduced_box)
                 reduced_box_center = (reduced_box_center.iloc[0]['x_center'], reduced_box_center.iloc[0]['y_center'])
                 reduced_box_label = reduced_box.iloc[0]['label']
@@ -707,6 +616,7 @@ def calculate_distance(pre, post):
                 # Loop through the centers for each original annotation
                 for i, cluster_center in cluster_centers.iterrows():
                     cluster_center = (cluster_center['x_center'], cluster_center['y_center'])
+
                     # Find the distance between the 'best fit' box and an original annotation
                     distance = math.dist(reduced_box_center, cluster_center)
 
@@ -716,11 +626,11 @@ def calculate_distance(pre, post):
                     # Annotation label
                     label = pre_cluster_df.iloc[i]['label']
 
+                    # Determine if the label is correct
                     if label == reduced_box_label:
                         label_array.append('Y')
                     else:
                         label_array.append('N')
-
 
                     box = pre_cluster_df.iloc[i]
 
@@ -739,18 +649,18 @@ def calculate_distance(pre, post):
                     # Add to iou array
                     iou_array.append(iou)
 
-                # Add distance array as a column to the cluster
+                # Add arrays as columns to the cluster
                 pre_cluster_df = pre_cluster_df.assign(distance=dist_array)
                 pre_cluster_df = pre_cluster_df.assign(correct_label=label_array)
                 pre_cluster_df = pre_cluster_df.assign(iou=iou_array)
 
                 # Add directly to original annotations
-                annotations_with_distance = pd.concat([annotations_with_distance, pre_cluster_df], ignore_index=True)
+                updated_annotations = pd.concat([updated_annotations, pre_cluster_df], ignore_index=True)
 
     # Add back the single clusters to the original annotations
-    annotations_with_distance = pd.concat([annotations_with_distance, single_clusters], ignore_index=True)
+    updated_annotations = pd.concat([updated_annotations, single_clusters], ignore_index=True)
 
-    return annotations_with_distance
+    return updated_annotations
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Main
@@ -759,25 +669,28 @@ def calculate_distance(pre, post):
 def main():
     parser = argparse.ArgumentParser(description="Reduce annotations for an image frame")
 
-    parser.add_argument("-csv", type=str,
-                        #default="./Annotations/extracted_data.csv",
+    parser.add_argument("--csv", type=str,
                         help="Input CSV file")
 
-    parser.add_argument("-image_dir", type=str,
+    parser.add_argument("--image_dir", type=str,
                         default="./Data",
                         help="The image directory")
 
-    parser.add_argument("-output_dir", type=str,
-                        default="./ALL",
+    parser.add_argument("--output_dir", type=str,
+                        default="./",
                          help="Output directory")
 
-    parser.add_argument("-num_samples", type=int,
+    # TODO: Should get rid of this eventually
+    parser.add_argument("--num_samples", type=int,
                         default=1,
                         help="Number of samples to run through")
 
-    parser.add_argument("-epsilon", type=int,
+    parser.add_argument("--epsilon", type=int,
                         default=70,
                         help="Epsilon value to be used for OPTICS clustering")
+
+    parser.add_argument("--cluster_plot_flag", action="store_true",
+                        help="Include if the cluster plots should be saved")
 
 
     args = parser.parse_args()
@@ -786,6 +699,7 @@ def main():
     input_csv = args.csv
     num_samples = args.num_samples
     epsilon = args.epsilon
+    cluster_plot_flag = args.cluster_plot_flag
 
     # Set directories
     image_dir = args.image_dir
@@ -793,13 +707,20 @@ def main():
 
     # Make the output directory
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(f"{output_dir}\\Visual_Comparison", exist_ok=True)
     os.makedirs(f"{output_dir}\\Yolo", exist_ok=True)
+
+    if cluster_plot_flag:
+        os.makedirs(f"{output_dir}\\Cluster Plots", exist_ok=True)
+
+    print("Input CSV:", input_csv)
+    print("Image Directory:", image_dir)
+    print("Output Directory:", output_dir)
+    print("Include Cluster Plots:", cluster_plot_flag)
+    print("Epsilon:", epsilon)
 
 
     try:
-        group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon)
-
+        group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cluster_plot_flag)
         print("Done.")
 
     except Exception as e:
