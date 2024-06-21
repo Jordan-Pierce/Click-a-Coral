@@ -1,4 +1,5 @@
 import os
+import sys
 import random
 import argparse
 
@@ -11,6 +12,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
+from sklearn.metrics import auc
 from sklearn.linear_model import LinearRegression
 from reduce_annotations import get_image, remove_single_clusters
 
@@ -42,7 +44,8 @@ def group_annotations(pre, post, image_dir, num_samples, output_dir, user):
     # Initialize the total amount of time spent on the annotations
     total_duration = pd.Timedelta(0, unit='s')
     # Initialize metrics dataframe
-    metrics_df = pd.DataFrame(columns=['Subject ID', 'Average_IoU', 'Class_Accuracy', 'image_path'])
+    metrics_df = pd.DataFrame(columns=['Subject ID', 'Average_IoU', 'Precision',
+                                       'Recall', 'image_path', 'Number_of_Annotations'])
 
     # Loop through the subject IDs in the original annotations
     for subjectid, subjectid_df in pre:
@@ -59,7 +62,7 @@ def group_annotations(pre, post, image_dir, num_samples, output_dir, user):
 
             # Get new dataframe
             no_singles = remove_single_clusters(subjectid_df)
-            metrics_df = create_image_row(no_singles, subjectid, metrics_df, image_path, image_name)
+            metrics_df = create_image_row(no_singles, subjectid, metrics_df, image_path, image_name, post_subjectid)
             # Compare original annotations to reduction
             compare_pre_post(subjectid_df, post_subjectid, image_path, output_dir, image_name, user)
 
@@ -136,7 +139,7 @@ def compare_accuracy(pre, post, image_path, output_dir, image_name):
 
         # Add the accuracy colorbar
         cbar = plt.colorbar(cmap='RdYlGn', location="bottom")
-        cbar.set_label("Accuracy")
+        cbar.set_label("Bounding Box Accuracy")
 
 
     # Plot reduced on the right subplot
@@ -160,6 +163,11 @@ def compare_accuracy(pre, post, image_path, output_dir, image_name):
                 ha='left', va='top',
                 bbox=dict(facecolor='green', alpha=0.5))
     plt.title('Post aggregation')
+    # Add legend outside the plot
+    red_patch = patches.Patch(color='red', label='Incorrect')
+    green_patch = patches.Patch(color='green', label='Correct')
+    plt.legend(handles=[red_patch, green_patch], title="Label Classification Accuracy", loc='lower center',
+               bbox_to_anchor=(1, 1))
 
     # Save the figure to the output directory
     plt.savefig(f"{output_dir}\\Accuracy\\{image_name}", bbox_inches='tight')
@@ -240,7 +248,7 @@ def compare_pre_post(pre, post, image_path, output_dir, image_name, user):
 
 
 #TODO: This function needs to be edited + workshopped
-def user_average(df):
+def user_average(df, reduced_df):
     """
     This function creates a new dataframe with the average IoU and number of annotations for each user.
 
@@ -254,7 +262,7 @@ def user_average(df):
     users = df.groupby(['user_name'])
 
     # Initialize empty dataframe
-    df = pd.DataFrame(columns=['User', 'Average_IoU', 'Number_of_Annotations'])
+    df = pd.DataFrame(columns=['User', 'Average_IoU', 'Number_of_Annotations', 'Average_Precision'])
 
     # Loop through users
     for user, user_df in users:
@@ -263,14 +271,68 @@ def user_average(df):
         average_iou = user_df['iou'].mean()
         user_name = user_df.iloc[0]['user_name']
 
+        ap = average_precision(user_df, reduced_df)
+
         # Add to dataframe
-        new_row = {'User': user_name, 'Average_IoU': average_iou, 'Number_of_Annotations': len(user_df)}
+        new_row = {'User': user_name, 'Average_IoU': average_iou,
+                   'Number_of_Annotations': len(user_df), 'Average_Precision': ap}
         df = df._append(new_row, ignore_index=True)
 
     return df
 
 
-def plot_information(df, output_dir):
+def average_precision(user_df, reduced_df):
+
+    precision_array = [0.0]
+    recall_array = [0.0]
+
+    # Make the subject ID's integers
+    user_df['Subject ID'] = user_df['Subject ID'].astype(int)
+    reduced_df['Subject ID'] = reduced_df['Subject ID'].astype(int)
+
+    # Group both dataframes by subject ID
+    user_df = user_df.groupby("Subject ID")
+    reduced_groups = reduced_df.groupby("Subject ID")
+
+    for subjectid, subjectid_df in user_df:
+
+        # Get the reduced annotations for the subject ID
+        if (reduced_df['Subject ID'] == subjectid).any():
+            reduced_subjectid = reduced_groups.get_group(subjectid)
+
+            # Get the precision
+            tp = subjectid_df['correct_label'].eq('Y').sum()
+            total = len(subjectid_df)
+            if total > 0:
+                precision = tp / total
+            else:
+                precision = 0
+
+            # Get the recall
+            if len(reduced_subjectid) > total:
+                fn = len(reduced_subjectid) - total
+            else:
+                fn = 0
+            recall = tp / (tp + fn)
+
+            # Add to arrays
+            precision_array.append(precision)
+            recall_array.append(recall)
+        else:
+            continue
+
+    ap_df = pd.DataFrame({'Precision': precision_array, 'Recall': recall_array})
+    ap_df.sort_values(by='Recall', inplace=True)
+    ap = auc(ap_df['Recall'], ap_df['Precision'])
+
+    return ap
+
+
+
+
+
+
+def plot_user_info(df, output_dir):
     """
     This function plots the information for all users looking at user IoU and the number of annotations for each user.
 
@@ -319,11 +381,51 @@ def plot_information(df, output_dir):
     plt.plot(subset_df['Number_of_Annotations'], line, color='red')
 
     # Save the plot
-    plt.savefig(f"{output_dir}\\annotations_vs_iou.jpg", bbox_inches='tight')
+    plt.savefig(f"{output_dir}\\annotations_vs_user_iou.jpg", bbox_inches='tight')
     plt.close()
 
 
-def user_information(reduced, original, user, image_dir, output_dir):
+def plot_image_info(df, output_dir):
+    """
+    This function plots the information for all users looking at user IoU and the number of annotations for each user.
+
+    Args:
+        df (Pandas dataframe): The original dataframe with all user annotations
+        output_dir (str): The path to the output directory where the plot should be saved
+    """
+
+    print("plot image", df)
+    # Subset and sort the dataframe
+   # subset_df = df[df['Number_of_Annotations'] > 10]
+    subset_df = df
+    subset_df.sort_values(by='Average_IoU', ascending=False, inplace=True)
+    print("test")
+   #  subset_df = subset_df.head(100)
+
+    # Second plot for IoU against number of annotations
+    # Plot the average distance by number of annotations
+    plt.figure(figsize=(20, 10))
+    plt.scatter(subset_df['Number_of_Annotations'], subset_df['Average_IoU'])
+
+    # Set axis labels
+    plt.ylabel("Average IoU")
+    plt.xlabel("Number of Annotations")
+    plt.title("Relationship Between # of Annotations and IoU with Reduced Box")
+
+    # Create regression line
+    model = LinearRegression()
+    model.fit(subset_df[['Number_of_Annotations']], subset_df['Average_IoU'])
+    line = model.predict(subset_df[['Number_of_Annotations']])
+
+    # Plot line of best fit
+    plt.plot(subset_df['Number_of_Annotations'], line, color='red')
+
+    # Save the plot
+    plt.savefig(f"{output_dir}\\annotations_vs_image_iou.jpg", bbox_inches='tight')
+    plt.close()
+
+
+def user_information(reduced, original, user, image_dir, output_dir, user_df):
     """
     This function looks at providing information regarding a specific user. It plots the same visualizations only for
     the user and creates a text file with information regarding the users status and ability.
@@ -334,7 +436,12 @@ def user_information(reduced, original, user, image_dir, output_dir):
         user (str): The user's name
         image_dir (str): The filepath to the image directory
         output_dir (str): The filepath to the output directory
+        user_df (Pandas dataframe): Dataframe containing information on all the users
     """
+
+    # Sorts user dataframe
+    user_df.sort_values(by='Average_Precision', ascending=False, inplace=True)
+    user_df.reset_index(drop=True, inplace=True)
 
     # Set output directory for the user
     output_dir = f"{output_dir}\\{user}"
@@ -344,16 +451,13 @@ def user_information(reduced, original, user, image_dir, output_dir):
     os.makedirs(f"{output_dir}\\User_vs_Reduction", exist_ok=True)
     os.makedirs(f"{output_dir}\\Accuracy", exist_ok=True)
 
-    # Creates a dataframe for all users
-    user_df = user_average(original)
-    user_df.sort_values(by='Average_IoU', ascending=False, inplace=True)
-    user_df.reset_index(drop=True, inplace=True)
-
     # Finds the specific user
     user_info = user_df.loc[user_df['User'] == user]
 
     # Gets the users ranking
     ranking = user_info.index.tolist()
+
+    ap = user_info['Average_Precision']
 
     # Find all the users annotations
     user_subset = original[original['user_name'] == user]
@@ -365,11 +469,12 @@ def user_information(reduced, original, user, image_dir, output_dir):
     # Find the reduced annotations that correspond to the users
     reduced_subset = reduced[reduced['Subject ID'].isin(subjectids)]
 
-    print(number_of_subjectids)
-
     # Run through the images for the user
     total_duration, images_df = group_annotations(user_subset, reduced_subset, image_dir,
                                                   number_of_subjectids, output_dir, True)
+
+    print("images df", images_df)
+    images_df.sort_values(by='Recall', ascending=False, inplace=True)
 
     # Finds the users most best and worst images (OPTIONAL)
     find_difficult_images(images_df, output_dir)
@@ -397,7 +502,8 @@ def user_information(reduced, original, user, image_dir, output_dir):
     txt_file.write(f"Total number of images annotated: {number_of_subjectids}\n")
     txt_file.write(f"IoU accuracy: {average_bbox_accuracy * 100}\n")
     txt_file.write(f"Identification accuracy: {proportion * 100}\n")
-    txt_file.write(f"Your ranking: {ranking[0]}")
+    txt_file.write(f"Average Precision: {ap * 100}")
+    txt_file.write(f"Your ranking (based on Average Precision): {ranking[0]}")
 
     txt_file.close()
 
@@ -452,7 +558,7 @@ def get_time_duration(annotation):
     return duration
 
 
-def create_image_row(df, subject_id, images_df, image_path, image_name):
+def create_image_row(df, subject_id, images_df, image_path, image_name, reduced_df):
     """
     This function creates a new dataframe row with metrics on a specific image/Subject ID.
 
@@ -462,6 +568,7 @@ def create_image_row(df, subject_id, images_df, image_path, image_name):
         images_df (Pandas dataframe): A dataframe that contains information on metrics for all the images
         image_path (str): Filepath to the image
         image_name (str): What the image should be called
+        reduced_df (Pandas dataframe): A dataframe containing the reduced annotations for a subject ID
 
     Returns:
         images_df (Pandas dataframe): The image dataframe with an additional row containing information on the image
@@ -471,17 +578,24 @@ def create_image_row(df, subject_id, images_df, image_path, image_name):
     # Get the average IoU
     average_iou = df['iou'].mean()
 
-    # Get the proportion of correct classifications
-    yes_count = df['correct_label'].eq('Y').sum()
+    # Get the precision
+    tp = df['correct_label'].eq('Y').sum()
     total = len(df)
     if total > 0:
-        proportion = yes_count / total
+        precision = tp / total
     else:
-        proportion = 0
+        precision = 0
+
+    # Get the recall
+    if len(reduced_df) > total:
+        fn = len(reduced_df) - total
+    else:
+        fn = 0
+    recall = tp / (tp + fn)
 
     # Create new row
-    new_row = {'Average_IoU': average_iou, 'Class_Accuracy': proportion, 'Subject ID': subject_id,
-               'image_path': image_path, 'image_name': image_name}
+    new_row = {'Average_IoU': average_iou, 'Precision': precision, 'Recall': recall, 'Subject ID': subject_id,
+               'image_path': image_path, 'image_name': image_name, 'Number_of_Annotations': total}
 
     # Add a new row to
     images_df = images_df._append(new_row, ignore_index=True)
@@ -529,7 +643,7 @@ def find_difficult_images(df, output_dir):
 
 
     # Sort the dataframe by class accuracy
-    df = df.sort_values(by='Class_Accuracy', ascending=False)
+    df = df.sort_values(by='Precision', ascending=False)
 
     txt_file.write("\n")
 
@@ -565,7 +679,7 @@ def main():
                         help="The image directory")
 
     parser.add_argument("--output_dir", type=str,
-                        default="./Reduced",
+                        default="./Test",
                         help="Output directory")
 
     # TODO: This will eventually be removed
@@ -578,7 +692,7 @@ def main():
                         help="A list of usernames")
 
     parser.add_argument("--num_users", type=int,
-                        default=None,
+                        default=2,
                         help="The number of random users to sample")
 
 
@@ -606,13 +720,20 @@ def main():
 
     try:
 
+        # Creates a dataframe for all users
+        user_df = user_average(pre, post)
+        print("user df", user_df)
+
         if user_names is None and num_users is None:
             total_duration, images_df = group_annotations(pre, post, image_dir, num_samples, output_dir, False)
 
-            find_difficult_images(images_df, output_dir)
+            #find_difficult_images(images_df, output_dir)
 
-            df = user_average(pre)
-            plot_information(df, output_dir)
+            #print("user df", user_df)
+            print("images df", images_df)
+
+            plot_user_info(user_df, output_dir)
+            plot_image_info(images_df, output_dir)
 
         else:
             output_dir = f"{output_dir}\\Users"
@@ -620,7 +741,7 @@ def main():
             if user_names is not None:
 
                 for user_name in user_names:
-                    user_information(post, pre, user_name, image_dir, output_dir)
+                    user_information(post, pre, user_name, image_dir, output_dir, user_df)
 
             else:
                 usernames = pre['user_name'].unique().tolist()
@@ -630,7 +751,7 @@ def main():
 
                 for user_name in user_names:
                     print(user_name)
-                    user_information(post, pre, user_name, image_dir, output_dir)
+                    user_information(post, pre, user_name, image_dir, output_dir, user_df)
 
 
         print("Done.")
