@@ -4,6 +4,8 @@ import argparse
 
 import math
 import statistics
+import traceback
+
 import numpy as np
 import pandas as pd
 
@@ -20,7 +22,8 @@ from sklearn.cluster import OPTICS
 # Functions
 # ----------------------------------------------------------------------------------------------------------------------
 
-def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cluster_plot_flag):
+def group_annotations(input_csv, num_samples, image_dir, output_dir,
+                      epsilon, cluster_plot_flag, cluster_size, big_box_threshold):
     """
         This function groups annotations in a dataframe according to their media ID and then
         subject ID. It also calls the other functions to reduce and save the annotations, as
@@ -34,6 +37,8 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cl
             epsilon (int): The value to determine how far away two points should be to
             declare them as a cluster
             cluster_plot_flag (bool): Whether the cluster plots should be saved
+            cluster_size (int or float): The minimum size of a cluster
+            big_box_threshold (float): The percent overlap of two boxes to consider one a 'big-boxer'
     """
 
     # Convert CSV to Pandas dataframe
@@ -48,7 +53,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cl
 
     # TODO: This will need to be gotten rid of
     # Initialize count
-    #count = 0
+    count = 0
 
     # Create output CSV file for reduced annotations
     output_csv = f"{output_dir}\\reduced_annotations.csv"
@@ -78,7 +83,8 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cl
             if len(subject_id_df) > 1:
 
                 # Makes clusters and saves their labels
-                cluster_labels, centers = make_clusters(subject_id_df, epsilon, image_path, cluster_plot_flag, output_dir, image_name)
+                cluster_labels, centers = make_clusters(subject_id_df, epsilon, image_path, cluster_plot_flag,
+                                                        output_dir, image_name, cluster_size)
 
                 # Reduce bounding boxes based on clusters
                 reduced_boxes, updated_annotations = reduce_boxes(subject_id_df, cluster_labels, centers)
@@ -87,7 +93,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cl
                 reduced_boxes = remove_single_clusters(reduced_boxes)
 
                 # Remove big boxers
-                reduced_boxes = remove_big_boxers(reduced_boxes)
+                reduced_boxes = remove_big_boxers(reduced_boxes, big_box_threshold)
 
                 # Returns original annotations updated
                 updated_annotations = update_annotations(updated_annotations, reduced_boxes)
@@ -130,12 +136,12 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cl
 
         #TODO: This will be deleted
        #Checks if Media ID count is over number of samples
-        # count += 1
-        # if count == num_samples:
-        #     return
+        count += 1
+        if count == num_samples:
+            return
 
 
-def make_clusters(annotations, epsilon, image_path, flag, output_dir, image_name):
+def make_clusters(annotations, epsilon, image_path, flag, output_dir, image_name, n):
     """
     This function clusters annotations based on the OPTICS clustering algorithm.
 
@@ -147,6 +153,7 @@ def make_clusters(annotations, epsilon, image_path, flag, output_dir, image_name
         flag (bool): Whether the cluster plots should be saved
         output_dir (str): The path to the output directory for the cluster plots
         image_name (str): What the cluster plot should be named
+        n (int or float): The minimum size of the cluster
 
     Returns:
          labels (array): List of all the clustering labels corresponding to the annotations
@@ -160,7 +167,7 @@ def make_clusters(annotations, epsilon, image_path, flag, output_dir, image_name
     array = centers.to_numpy()
 
     # Clusters using OPTICS
-    clust = OPTICS(min_samples=0.0, cluster_method='dbscan', eps=epsilon, min_cluster_size=None)
+    clust = OPTICS(min_samples=n, cluster_method='dbscan', eps=epsilon, min_cluster_size=None)
     clust.fit(array)
 
     # Saves the clustering labels
@@ -288,9 +295,6 @@ def reduce_boxes(annotations, labels, centers):
             mode = statistics.mode(cluster_df['label'])
             avg_bbox['label'] = mode
 
-            #TODO: This needs to be done better
-            # Add in the missing columns
-            # Get information from first row
             new_row = cluster_df.iloc[0]
             new_row = pd.DataFrame(new_row).T
             # Remove the x, y, w, h, and label columns
@@ -335,12 +339,13 @@ def remove_single_clusters(df):
     return no_single_clusters
 
 
-def remove_big_boxers(reduced):
+def remove_big_boxers(reduced, n):
     """
     This function removes big boxer annotations from the reduced dataframe.
 
     Args:
         reduced (Pandas dataframe): The reduced annotation dataframe
+        n (float): The percent overlap for a box to be considered a 'big-boxer'
 
     Returns:
         reduced (Pandas dataframe): The reduced annotation dataframe without big boxers
@@ -367,7 +372,7 @@ def remove_big_boxers(reduced):
             percent = total_overlap(row, reduced)
 
             # Remove boxes that have significant overlap
-            if percent > 0.3:
+            if percent > n:
                 reduced = reduced.drop(i)
             else:
                 continue
@@ -468,7 +473,8 @@ def save_to_csv(output_csv, annotations, column_drop):
     # Checks if these columns need to be dropped
     if column_drop:
         # Get rid of unnecessary information
-        annotations = annotations.drop(columns=['classification_id', 'user_name', 'user_ip', 'created_at', 'retired', 'user_id', 'Unnamed: 0'])
+        annotations = annotations.drop(columns=['classification_id', 'user_name', 'user_ip',
+                                                'created_at', 'retired', 'user_id', 'Unnamed: 0'])
 
     # Save the annotations to a csv file
     if os.path.isfile(output_csv):
@@ -666,6 +672,7 @@ def update_annotations(pre, post):
 # Main
 # ----------------------------------------------------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(description="Reduce annotations for an image frame")
 
@@ -678,7 +685,7 @@ def main():
 
     parser.add_argument("--output_dir", type=str,
                         default="./",
-                         help="Output directory")
+                        help="Output directory")
 
     # TODO: Should get rid of this eventually
     parser.add_argument("--num_samples", type=int,
@@ -692,6 +699,13 @@ def main():
     parser.add_argument("--cluster_plot_flag", action="store_true",
                         help="Include if the cluster plots should be saved")
 
+    parser.add_argument("--cluster_size", type=int or float,
+                        default=0.0,
+                        help="Determine the minimum size for a cluster")
+
+    parser.add_argument("--big_box_threshold", type=float,
+                        default=0.3,
+                        help="The percent of overlap required to consider it a 'big boxer'")
 
     args = parser.parse_args()
 
@@ -700,6 +714,8 @@ def main():
     num_samples = args.num_samples
     epsilon = args.epsilon
     cluster_plot_flag = args.cluster_plot_flag
+    cluster_size = args.cluster_size
+    big_box_threshold = args.big_box_threshold
 
     # Set directories
     image_dir = args.image_dir
@@ -717,14 +733,18 @@ def main():
     print("Output Directory:", output_dir)
     print("Include Cluster Plots:", cluster_plot_flag)
     print("Epsilon:", epsilon)
+    print("Cluster Size:", cluster_size)
+    print("Big Box Percent Threshold:", big_box_threshold)
 
 
     try:
-        group_annotations(input_csv, num_samples, image_dir, output_dir, epsilon, cluster_plot_flag)
+        group_annotations(input_csv, num_samples, image_dir, output_dir,
+                          epsilon, cluster_plot_flag, cluster_size, big_box_threshold)
         print("Done.")
 
     except Exception as e:
         print(f"ERROR: {e}")
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
