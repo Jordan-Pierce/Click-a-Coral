@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 from sklearn.metrics import auc
-from sklearn.linear_model import LinearRegression
+from from_Zooniverse import plot_samples
 from reduce_annotations import get_image, remove_single_clusters
 
 
@@ -64,6 +64,7 @@ def group_annotations(pre, post, image_dir, output_dir, user, threshold):
 
             if not user:
                 metrics_df = create_image_row(no_singles, subject_id, metrics_df, image_path, image_name, threshold)
+
             # Compare original annotations to reduction
             compare_pre_post(subject_id_df, post_subject_id, image_path, output_dir, image_name, user)
 
@@ -102,7 +103,7 @@ def compare_pre_post(pre, post, image_path, output_dir, image_name, user):
 
     # Plot pre on the left subplot
     axs[0].imshow(image)
-    axs[0].set_title('Original User Annotations')
+    axs[0].set_title(f'Original User Annotations: {len(pre)} annotations')
     for i, r in pre.iterrows():
         # Extract the values of this annotation
         x, y, w, h = r[['x', 'y', 'w', 'h']]
@@ -127,7 +128,7 @@ def compare_pre_post(pre, post, image_path, output_dir, image_name, user):
 
     # Plot image 2 on the right subplot
     axs[1].imshow(image)
-    axs[1].set_title("Reduced Annotations")
+    axs[1].set_title(f"Reduced Annotations: {len(post)} annotations")
 
     for i, r in post.iterrows():
         # Extract the values of this annotation
@@ -210,7 +211,7 @@ def compare_accuracy(pre, post, image_path, output_dir, image_name):
     # Add legend to the plot
     red_patch = patches.Patch(color='red', label='Incorrect')
     green_patch = patches.Patch(color='green', label='Correct')
-    axs[0].legend(handles=[red_patch, green_patch], title="Classification Accuracy", loc='upper right')
+    axs[0].legend(handles=[red_patch, green_patch], loc='upper right')
 
     # Plot reduced on the right subplot
     axs[1].imshow(image, cmap="RdYlGn")
@@ -239,7 +240,7 @@ def compare_accuracy(pre, post, image_path, output_dir, image_name):
     # Add the accuracy colorbar
     cbar = fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=color_code),
                         ax=axs, location="right", shrink=0.45, pad=0.01)
-    cbar.set_label("Bounding Box Accuracy")
+    cbar.set_label("Bounding Box IoU")
 
     # Save the figure to the output directory
     plt.savefig(f"{output_dir}\\Accuracy\\{image_name}", bbox_inches='tight')
@@ -258,6 +259,14 @@ def plot_rankings(df, output_dir):
     # Groups the users by division
     div_groups = df.groupby("Division")
 
+    # String dict
+    div_descriptions = {
+        1: 'These users have made more than 100 annotations',
+        2: 'These users have made up to 100 annotations',
+        3: 'These users have made up to 50 annotations',
+        4: 'These users have made up to 10 annotations'
+    }
+
     # Loops through each division
     for div, div_df, in div_groups:
 
@@ -275,7 +284,9 @@ def plot_rankings(df, output_dir):
         plt.xticks(rotation=90, fontsize=5)
 
         # Set the title
-        plt.title(f"Division {div}: Top 100 Users")
+        plt.suptitle(f"Division {div}: Top 100 Users", fontsize=20)
+        plt.title(div_descriptions[div])
+
         plt.tight_layout()
 
         # Save the plot
@@ -295,36 +306,21 @@ def plot_point_graphs(user_df, image_df, output_dir):
     """
 
     # Initialize the plot
-    fig, axs = plt.subplots(ncols=2, figsize=(20, 10), sharey=True, sharex=True)
+    fig, axs = plt.subplots(ncols=2, figsize=(20, 10), sharey=True)
 
     # Plot the left subplot for users
     axs[0].scatter(user_df['Number_of_Annotations'], user_df['Mean_Average_Precision'])
     axs[0].set_ylim(0.0, 1.0)
     axs[0].set_title("User")
 
-    # Create regression line
-    model = LinearRegression()
-    model.fit(user_df[['Number_of_Annotations']], user_df['Mean_Average_Precision'])
-    line = model.predict(user_df[['Number_of_Annotations']])
-
-    # Plot line of best fit
-    axs[0].plot(user_df['Number_of_Annotations'], line, color='red')
-
     # Plot right subplot for images
     axs[1].scatter(image_df['Number_of_Annotations'], image_df['Mean_Average_Precision'])
     axs[1].set_title("Images")
 
-    # Create regression line
-    model = LinearRegression()
-    model.fit(image_df[['Number_of_Annotations']], image_df['Mean_Average_Precision'])
-    line = model.predict(image_df[['Number_of_Annotations']])
-
-    # Plot line of best fit
-    axs[1].plot(image_df['Number_of_Annotations'], line, color='red')
-
     # Set axis labels
     fig.supylabel("Mean Average Precision")
     fig.supxlabel("Number of Annotations")
+
     plt.tight_layout()
 
     # Save the plot
@@ -672,7 +668,7 @@ def get_precision(df, threshold):
     return tp, precision, total
 
 
-def find_difficult_images(df, output_dir, n):
+def find_difficult_images(images_df, original_df, output_dir, n, image_dir):
     """
     This function finds the most and least difficult images for a dataframe containing information
     on a number of images.
@@ -691,24 +687,75 @@ def find_difficult_images(df, output_dir, n):
     os.makedirs(f"{output_dir}\\Hard", exist_ok=True)
 
     # Create text file for images
-    txt_file = open(f"{output_dir}\\hard_and_easy_images.txt", "w")
+    #txt_file = open(f"{output_dir}\\hard_and_easy_images.txt", "w")
 
     # Sort the dataframe based on IoU
-    df = df.sort_values(by='Mean_Average_Precision', ascending=False)
+    images_df = images_df.sort_values(by='Mean_Average_Precision', ascending=False)
 
     # Add the top easiest images
-    txt_file.write(f"The top {n} easiest images for users were:\n")
-    for i, row in df.head(n).iterrows():
-        txt_file.write(f"{row['image_name']}\n")
-        shutil.copy(row['image_path'], f"{output_dir}\\Easy")
+    #txt_file.write(f"The top {n} easiest images for users were:\n")
+    output_dir = f"{output_dir}\\Easy"
+    for i, row in images_df.head(n).iterrows():
+
+        subject_id = row['Subject ID']
+        image_df = original_df[original_df['Subject ID'] == subject_id]
+        #image_path, image_name, frame_name = get_image(image_df.iloc[0], image_dir)
+
+        plot_image(image_df, row['image_path'], output_dir, row['image_name'])
+
+
+        # txt_file.write(f"{row['image_name']}\n")
+        # shutil.copy(row['image_path'], f"{output_dir}\\Easy")
 
     # Add the top hardest images
-    txt_file.write(f"The top {n} hardest images for users were:\n")
-    for i, row in df.tail(n).iterrows():
-        txt_file.write(f"{row['image_name']}\n")
-        shutil.copy(row['image_path'], f"{output_dir}\\Hard")
+    #txt_file.write(f"The top {n} hardest images for users were:\n")
+    output_dir = f"{output_dir}\\Hard"
+    for i, row in images_df.tail(n).iterrows():
+        subject_id = row['Subject ID']
+        image_df = original_df[original_df['Subject ID'] == subject_id]
+        # image_path, image_name, frame_name = get_image(image_df.iloc[0], image_dir)
 
-    txt_file.close()
+        plot_image(image_df, row['image_path'], output_dir, row['image_name'])
+        # txt_file.write(f"{row['image_name']}\n")
+        # shutil.copy(row['image_path'], f"{output_dir}\\Hard")
+
+    #txt_file.close()
+
+def plot_image(df, image_path, output_dir, image_name):
+
+    # Get a color mapping for all the users first
+    usernames = df['user_name'].unique().tolist()
+    color_codes = {username: tuple(np.random.rand(3, )) for username in usernames}
+
+    # Plot the images side by side
+    image = plt.imread(image_path)
+    plt.figure(figsize=(20, 10))
+
+    # Plot pre on the left subplot
+    plt.imshow(image)
+    plt.title(f'Original User Annotations: {len(df)} annotations')
+
+    for i, r in df.iterrows():
+        # Extract the values of this annotation
+        x, y, w, h = r[['x', 'y', 'w', 'h']]
+
+        edge_color = color_codes[r['user_name']]
+
+        # Create the figure
+        rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor=edge_color, facecolor='none')
+        plt.add_patch(rect)
+
+        # Plot the class label on the bbox
+        plt.text(x + w * 0.02,
+                    y + h * 0.98,
+                    r['label'],
+                    color='white', fontsize=8,
+                    ha='left', va='top',
+                    bbox=dict(facecolor=edge_color, alpha=0.5))
+
+    # Save the figure to the output directory
+    plt.savefig(f"{output_dir}\\{image_name}", bbox_inches='tight')
+    plt.close()
 
 
 def get_time_duration(annotation):
@@ -747,7 +794,7 @@ def main():
     parser.add_argument("--reduced_csv", type=str,
                         help="The CSV of reduced annotations")
 
-    parser.add_argument("--full_csv", type=str,
+    parser.add_argument("--extracted_csv", type=str,
                         help="The CSV of all annotations")
 
     parser.add_argument("--image_dir", type=str,
@@ -770,7 +817,7 @@ def main():
                         default=10,
                         help="The number of easy/difficult images to output in the Image Difficulty folder")
 
-    parser.add_argument("--threshold", type=float,
+    parser.add_argument("--iou_threshold", type=float,
                         default=0.6,
                         help="The IoU threshold to be taken into account for mAP")
 
@@ -778,15 +825,15 @@ def main():
 
     # Parse out arguments
     reduced_csv = args.reduced_csv
-    full_csv = args.full_csv
+    extracted_csv = args.extracted_csv
     user_names = args.user
     image_dir = args.image_dir
     num_users = args.num_users
     num_images = args.num_images
-    threshold = args.threshold
+    iou_threshold = args.iou_threshold
 
     # Turn both csv files into pandas dataframes
-    pre = pd.read_csv(full_csv)
+    pre = pd.read_csv(extracted_csv)
     post = pd.read_csv(reduced_csv)
 
     # Create output directories
@@ -800,10 +847,10 @@ def main():
     try:
 
         # Creates a dataframe for all users
-        user_df = user_average(pre, post, threshold)
+        user_df = user_average(pre, post, iou_threshold)
 
         if user_names is None and num_users is None:
-            total_duration, images_df = group_annotations(pre, post, image_dir, output_dir, False, threshold)
+            total_duration, images_df = group_annotations(pre, post, image_dir, output_dir, False, iou_threshold)
 
             find_difficult_images(images_df, output_dir, num_images)
 
@@ -816,7 +863,7 @@ def main():
             if user_names is not None:
 
                 for user_name in user_names:
-                    user_information(post, pre, user_name, image_dir, output_dir, user_df, threshold)
+                    user_information(post, pre, user_name, image_dir, output_dir, user_df, iou_threshold)
 
             else:
                 usernames = pre['user_name'].unique().tolist()
@@ -825,7 +872,7 @@ def main():
                 user_names = random.sample(usernames, num_users)
 
                 for user_name in user_names:
-                    user_information(post, pre, user_name, image_dir, output_dir, user_df, threshold)
+                    user_information(post, pre, user_name, image_dir, output_dir, user_df, iou_threshold)
 
 
         print("Done.")
