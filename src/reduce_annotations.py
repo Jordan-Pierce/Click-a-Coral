@@ -6,6 +6,7 @@ import math
 import statistics
 import traceback
 
+import datetime
 import numpy as np
 import pandas as pd
 
@@ -41,6 +42,9 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir,
             big_box_threshold (float): The percent overlap of two boxes to consider one a 'big-boxer'
     """
 
+    # Get the timestamp
+    timestamp = get_now()
+
     # Convert CSV to Pandas dataframe
     df = pd.read_csv(input_csv)
     df['Subject ID'] = df['Subject ID'].astype(int)
@@ -51,15 +55,14 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir,
     # Group by Media ID
     df = df.groupby("Media ID")
 
-    # TODO: This will need to be gotten rid of
     # Initialize count
     count = 0
 
     # Create output CSV file for reduced annotations
-    output_csv = f"{output_dir}\\reduced_annotations.csv"
+    output_csv = f"{output_dir}\\reduced_annotations"
 
     # Create CSV file for original annotations
-    updated_annotations_csv = f"{output_dir}\\extracted_data_w_additional.csv"
+    updated_annotations_csv = f"{output_dir}\\extracted_data_w_additional"
 
     # Loops through Media ID's
     for media_id, media_id_df in df:
@@ -99,13 +102,14 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir,
                 updated_annotations = update_annotations(updated_annotations, reduced_boxes)
 
                 # Saves original annotations with cluster labels and distance to CSV
-                save_to_csv(updated_annotations_csv, updated_annotations, False)
+                save_to_csv(updated_annotations_csv, updated_annotations, False, timestamp)
 
                 if reduced_boxes is None:
+                    #TODO: Represents difficult image
                     continue
                 else:
                     # Saves reduced annotations
-                    save_to_csv(output_csv, reduced_boxes, True)
+                    save_to_csv(output_csv, reduced_boxes, True, timestamp)
 
                     # Makes a detection based off of the reduced boxes and classes
                     detection = make_detection(reduced_boxes, classes)
@@ -134,14 +138,14 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir,
             # Converts to YOLO format
             yolo_format(ds, yolo_dir, classes)
 
-        #TODO: This will be deleted
        #Checks if Media ID count is over number of samples
-        count += 1
-        if count == num_samples:
-            return
+        if num_samples is not None:
+            count += 1
+            if count == num_samples:
+                return
 
 
-def make_clusters(annotations, epsilon, image_path, flag, output_dir, image_name, n):
+def make_clusters(annotations, epsilon, image_path, plot_clusters, output_dir, image_name, n):
     """
     This function clusters annotations based on the OPTICS clustering algorithm.
 
@@ -150,7 +154,7 @@ def make_clusters(annotations, epsilon, image_path, flag, output_dir, image_name
         epsilon (int): Threshold value for how far apart points should be to consider
         them a cluster
         image_path (str): Path to the image corresponding to a subject ID
-        flag (bool): Whether the cluster plots should be saved
+        plot_clusters (bool): Whether the cluster plots should be saved
         output_dir (str): The path to the output directory for the cluster plots
         image_name (str): What the cluster plot should be named
         n (int or float): The minimum size of the cluster
@@ -174,7 +178,7 @@ def make_clusters(annotations, epsilon, image_path, flag, output_dir, image_name
     labels = clust.labels_
 
     # Plots the clustering
-    if flag:
+    if plot_clusters:
         plot_points(array, labels, image_path, output_dir, image_name)
 
     return labels, centers
@@ -322,19 +326,9 @@ def remove_single_clusters(df):
         no_single_clusters (Pandas dataframe): Annotations without single clusters
     """
 
-    # Initializes dataframe
-    no_single_clusters = pd.DataFrame()
-    count = 0
-
-    # Iterates through annotations
-    for i, row in df.iterrows():
-
-        # Removes clusters of -1
-        # This indicates a single cluster
-        if row['clusters'] != -1:
-            no_single_clusters = no_single_clusters._append(row, ignore_index=True)
-        else:
-            count += 1
+    # Subset the dataframe to remove single clusters
+    no_single_clusters = df[df['clusters'] != -1]
+    no_single_clusters.reset_index(drop=True, inplace=True)
 
     return no_single_clusters
 
@@ -359,6 +353,7 @@ def remove_big_boxers(reduced, n):
     reduced['area'] = reduced['h'] * reduced['w']
 
     # Find the mean area
+    #TODO: Look into percentiles and quartiles
     mean_area = reduced['area'].mean()
 
     # Sort dataframe by area
@@ -456,7 +451,7 @@ def get_image(row, image_dir):
     return frame_path, image_name, frame_name
 
 
-def save_to_csv(output_csv, annotations, column_drop):
+def save_to_csv(output_csv, annotations, column_drop, timestamp):
     """
     This function saves annotations to a CSV file
 
@@ -464,8 +459,10 @@ def save_to_csv(output_csv, annotations, column_drop):
         output_csv (str): Filepath for the output CSV file
         annotations (Pandas dataframe): Annotations to be saved
         column_drop (bool): Drop additional columns, true or false
+        timestamp (str): The timestamp for the run
     """
 
+    output_csv = f"{output_csv}_{timestamp}.csv"
     # Checks if there are no annotations
     if annotations is None:
         return
@@ -481,6 +478,19 @@ def save_to_csv(output_csv, annotations, column_drop):
         annotations.to_csv(output_csv, mode='a', header=False, index=False)
     else:
         annotations.to_csv(output_csv, index=False)
+
+
+def get_now():
+    """
+    Returns a datetime string formatted according to the current time.
+
+    :return:
+    """
+    # Get the current datetime
+    now = datetime.datetime.now()
+    now = now.strftime("%Y-%m-%d_%H-%M-%S")
+
+    return now
 
 
 def make_detection(annotations, class_labels):
@@ -554,6 +564,8 @@ def yolo_format(ds, yolo_dir, classes):
     with open(txt_path, "w") as file:
         for string in classes:
             file.write(string + "\n")
+
+    #TODO: Add .yaml file
 
 
 def update_annotations(pre, post):
@@ -687,11 +699,11 @@ def main():
                         default="./",
                         help="Output directory")
 
-    # TODO: Should get rid of this eventually
     parser.add_argument("--num_samples", type=int,
-                        default=1,
+                        default=None,
                         help="Number of samples to run through")
 
+    # TODO: Change eps to float
     parser.add_argument("--epsilon", type=int,
                         default=70,
                         help="Epsilon value to be used for OPTICS clustering")
