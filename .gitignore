@@ -4,3 +4,4 @@ Models
 *.pt
 src/__pycache__/
 Annotations
+classifications.csv
