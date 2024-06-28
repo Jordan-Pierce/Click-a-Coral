@@ -2,9 +2,7 @@ import os
 import random
 import argparse
 
-import shutil
 import traceback
-
 import numpy as np
 import pandas as pd
 from datetime import datetime as dt
@@ -14,7 +12,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 from sklearn.metrics import auc
-from from_Zooniverse import plot_samples
 from reduce_annotations import get_image, remove_single_clusters
 
 
@@ -311,10 +308,12 @@ def plot_point_graphs(user_df, image_df, output_dir):
     # Plot the left subplot for users
     axs[0].scatter(user_df['Number_of_Annotations'], user_df['Mean_Average_Precision'])
     axs[0].set_ylim(0.0, 1.0)
+    axs[0].set_xlim(xmin=0.0)
     axs[0].set_title("User")
 
     # Plot right subplot for images
     axs[1].scatter(image_df['Number_of_Annotations'], image_df['Mean_Average_Precision'])
+    axs[1].set_xlim(xmin=0.0)
     axs[1].set_title("Images")
 
     # Set axis labels
@@ -668,70 +667,66 @@ def get_precision(df, threshold):
     return tp, precision, total
 
 
-def find_difficult_images(images_df, original_df, output_dir, n, image_dir):
+def find_difficult_images(images_df, original_df, output_dir, n):
     """
     This function finds the most and least difficult images for a dataframe containing information
     on a number of images.
 
     Args:
-        df (Pandas dataframe): An image dataframe in the format provided from create_image_row
+        images_df (Pandas dataframe): An image dataframe in the format provided from create_image_row
+        original_df (Pandas dataframe): The dataframe with all original annotations
         output_dir (str): Path to the output directory
         n (int): The number of images to output
     """
 
-    output_dir = f"{output_dir}\\Image Difficulty"
-
     # Make all the directories
+    output_dir = f"{output_dir}\\Image Difficulty"
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(f"{output_dir}\\Easy", exist_ok=True)
     os.makedirs(f"{output_dir}\\Hard", exist_ok=True)
-
-    # Create text file for images
-    #txt_file = open(f"{output_dir}\\hard_and_easy_images.txt", "w")
 
     # Sort the dataframe based on IoU
     images_df = images_df.sort_values(by='Mean_Average_Precision', ascending=False)
 
     # Add the top easiest images
-    #txt_file.write(f"The top {n} easiest images for users were:\n")
-    output_dir = f"{output_dir}\\Easy"
     for i, row in images_df.head(n).iterrows():
 
+        # Find the image annotations
         subject_id = row['Subject ID']
         image_df = original_df[original_df['Subject ID'] == subject_id]
-        #image_path, image_name, frame_name = get_image(image_df.iloc[0], image_dir)
 
-        plot_image(image_df, row['image_path'], output_dir, row['image_name'])
-
-
-        # txt_file.write(f"{row['image_name']}\n")
-        # shutil.copy(row['image_path'], f"{output_dir}\\Easy")
+        # Plot the image
+        plot_image(image_df, row['image_path'], f"{output_dir}\\Easy", row['image_name'])
 
     # Add the top hardest images
-    #txt_file.write(f"The top {n} hardest images for users were:\n")
-    output_dir = f"{output_dir}\\Hard"
     for i, row in images_df.tail(n).iterrows():
+
+        # Find the image annotations
         subject_id = row['Subject ID']
         image_df = original_df[original_df['Subject ID'] == subject_id]
-        # image_path, image_name, frame_name = get_image(image_df.iloc[0], image_dir)
 
-        plot_image(image_df, row['image_path'], output_dir, row['image_name'])
-        # txt_file.write(f"{row['image_name']}\n")
-        # shutil.copy(row['image_path'], f"{output_dir}\\Hard")
+        # Plot the image
+        plot_image(image_df, row['image_path'], f"{output_dir}\\Hard", row['image_name'])
 
-    #txt_file.close()
 
 def plot_image(df, image_path, output_dir, image_name):
+    """
+    This function plots the original user annotations for an image.
+
+    Args:
+        df (Pandas dataframe): A dataframe of annotations for one image
+        image_path (str): The filepath to the image location
+        output_dir (str): The path to the output directory
+        image_name (str): What the image plot should be named
+    """
 
     # Get a color mapping for all the users first
     usernames = df['user_name'].unique().tolist()
     color_codes = {username: tuple(np.random.rand(3, )) for username in usernames}
 
-    # Plot the images side by side
+    # Plot the image
     image = plt.imread(image_path)
     plt.figure(figsize=(20, 10))
-
-    # Plot pre on the left subplot
     plt.imshow(image)
     plt.title(f'Original User Annotations: {len(df)} annotations')
 
@@ -743,15 +738,15 @@ def plot_image(df, image_path, output_dir, image_name):
 
         # Create the figure
         rect = patches.Rectangle((x, y), w, h, linewidth=2, edgecolor=edge_color, facecolor='none')
-        plt.add_patch(rect)
+        plt.gca().add_patch(rect)
 
         # Plot the class label on the bbox
         plt.text(x + w * 0.02,
-                    y + h * 0.98,
-                    r['label'],
-                    color='white', fontsize=8,
-                    ha='left', va='top',
-                    bbox=dict(facecolor=edge_color, alpha=0.5))
+                 y + h * 0.98,
+                 r['label'],
+                 color='white', fontsize=8,
+                 ha='left', va='top',
+                 bbox=dict(facecolor=edge_color, alpha=0.5))
 
     # Save the figure to the output directory
     plt.savefig(f"{output_dir}\\{image_name}", bbox_inches='tight')
@@ -852,7 +847,7 @@ def main():
         if user_names is None and num_users is None:
             total_duration, images_df = group_annotations(pre, post, image_dir, output_dir, False, iou_threshold)
 
-            find_difficult_images(images_df, output_dir, num_images)
+            find_difficult_images(images_df, pre, output_dir, num_images)
 
             plot_rankings(user_df, output_dir)
             plot_point_graphs(user_df, images_df, output_dir)
