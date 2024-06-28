@@ -3,8 +3,8 @@ import glob
 import argparse
 
 import math
-import statistics
 import traceback
+import statistics
 
 import datetime
 import numpy as np
@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 
 import cv2
 import supervision as sv
+from autodistill import helpers
 from sklearn.cluster import OPTICS
 
 
@@ -105,7 +106,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir,
                 save_to_csv(updated_annotations_csv, updated_annotations, False, timestamp)
 
                 if reduced_boxes is None:
-                    #TODO: Represents difficult image
+                    # TODO: Represents difficult image
                     continue
                 else:
                     # Saves reduced annotations
@@ -138,7 +139,7 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir,
             # Converts to YOLO format
             yolo_format(ds, yolo_dir, classes)
 
-       #Checks if Media ID count is over number of samples
+        # Checks if Media ID count is over number of samples
         if num_samples is not None:
             count += 1
             if count == num_samples:
@@ -353,7 +354,7 @@ def remove_big_boxers(reduced, n):
     reduced['area'] = reduced['h'] * reduced['w']
 
     # Find the mean area
-    #TODO: Look into percentiles and quartiles
+    # TODO: Look into percentiles and quartiles
     mean_area = reduced['area'].mean()
 
     # Sort dataframe by area
@@ -552,10 +553,16 @@ def yolo_format(ds, yolo_dir, classes):
 
     # Create YOLO subdirectories
     yolo_images = f"{yolo_dir}\\images"
-    yolo_labels = f"{yolo_dir}\\labels"
+    yolo_labels = f"{yolo_dir}\\annotations"
+    yolo_yaml = f"{yolo_dir}\\data.yaml"
 
     # Convert to YOLO format
-    ds.as_yolo(images_directory_path=yolo_images, annotations_directory_path=yolo_labels)
+    ds.as_yolo(images_directory_path=yolo_images,
+               annotations_directory_path=yolo_labels,
+               data_yaml_path=yolo_yaml)
+
+    # Split to training and validation sets
+    helpers.split_data(yolo_dir)
 
     # Create class txt file
     txt_path = f"{yolo_dir}\\classes.txt"
@@ -565,7 +572,9 @@ def yolo_format(ds, yolo_dir, classes):
         for string in classes:
             file.write(string + "\n")
 
-    #TODO: Add .yaml file
+    # Remove image and annotation folders not in use
+    os.rmdir(yolo_images)
+    os.rmdir(yolo_labels)
 
 
 def update_annotations(pre, post):
@@ -703,8 +712,7 @@ def main():
                         default=None,
                         help="Number of samples to run through")
 
-    # TODO: Change eps to float
-    parser.add_argument("--epsilon", type=int,
+    parser.add_argument("--epsilon", type=float,
                         default=70,
                         help="Epsilon value to be used for OPTICS clustering")
 
