@@ -1,4 +1,4 @@
-*.jpg
+Data
 .idea
 Models
 *.pt
