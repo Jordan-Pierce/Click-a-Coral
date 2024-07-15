@@ -9,6 +9,7 @@ import statistics
 import datetime
 import numpy as np
 import pandas as pd
+import random
 
 import torch
 from torchvision import ops
@@ -25,7 +26,7 @@ from sklearn.cluster import OPTICS
 # ----------------------------------------------------------------------------------------------------------------------
 
 def group_annotations(input_csv, num_samples, image_dir, output_dir,
-                      epsilon, cluster_plot_flag, cluster_size, big_box_threshold):
+                      epsilon, cluster_plot_flag, cluster_size, big_box_threshold, retirement_age):
     """
         This function groups annotations in a dataframe according to their media ID and then
         subject ID. It also calls the other functions to reduce and save the annotations, as
@@ -85,6 +86,13 @@ def group_annotations(input_csv, num_samples, image_dir, output_dir,
 
             # If Subject ID has only one annotation, skip clustering and reduction
             if len(subject_id_df) > 1:
+
+                all_users = subject_id_df['user_name'].unique().tolist()
+
+                if len(all_users) > retirement_age:
+                    random_users = random.sample(all_users, retirement_age)
+
+                    subject_id_df = subject_id_df[subject_id_df['user_name'].isin(random_users)]
 
                 # Makes clusters and saves their labels
                 cluster_labels, centers = make_clusters(subject_id_df, epsilon, image_path, cluster_plot_flag,
@@ -727,6 +735,10 @@ def main():
                         default=0.3,
                         help="The percent of overlap required to consider it a 'big boxer'")
 
+    parser.add_argument("--retirement_age", type=int,
+                        default=30,
+                        help="The number of people who need to see the image before it is retired")
+
     args = parser.parse_args()
 
     # Parse out arguments
@@ -736,6 +748,7 @@ def main():
     cluster_plot_flag = args.cluster_plot_flag
     cluster_size = args.cluster_size
     big_box_threshold = args.big_box_threshold
+    retirement_age = args.retirement_age
 
     # Set directories
     image_dir = args.image_dir
@@ -759,7 +772,7 @@ def main():
 
     try:
         group_annotations(input_csv, num_samples, image_dir, output_dir,
-                          epsilon, cluster_plot_flag, cluster_size, big_box_threshold)
+                          epsilon, cluster_plot_flag, cluster_size, big_box_threshold, retirement_age)
         print("Done.")
 
     except Exception as e:
