@@ -31,22 +31,21 @@ def annotation_count(retirement_dir, output_dir, image_dir, threshold):
 
         age = int(dir.split("_", 1)[1])
 
-        #dir = f"{retirement_dir}/{dir}/Reduced"
-        dir = f"{retirement_dir}/{dir}"
+        dir = f"{retirement_dir}\\{dir}\\Reduced"
 
         reduced = [file for file in os.listdir(dir) if file.startswith("reduced")][0]
 
         extracted = [file for file in os.listdir(dir) if file.startswith("extracted")][0]
 
-        reduced = pd.read_csv(f"{dir}/{reduced}")
-        extracted = pd.read_csv(f"{dir}/{extracted}")
+        reduced = pd.read_csv(f"{dir}\\{reduced}")
+        extracted = pd.read_csv(f"{dir}\\{extracted}")
 
         image_df = group_annotations(reduced, extracted, dir, image_dir, threshold)
 
         print(image_df)
 
         # Create output CSV file for reduced annotations
-        output_csv = f"{dir}/image_info"
+        output_csv = f"{output_dir}\\Retirement_{age}\\image_info"
 
         # Get the timestamp
         timestamp = get_now()
@@ -71,13 +70,10 @@ def annotation_count(retirement_dir, output_dir, image_dir, threshold):
 
     # Plot the left subplot for reduced annotations
     axs[0].bar(counts['Retirement_Age'], counts['Reduced_Annotation_Number'], width=3)
-    #axs[0].set_ylim(0.0, 1.0)
-    #axs[0].set_xlim(xmin=0.0)
     axs[0].set_title("Reduced Annotations")
 
     # Plot right subplot for original annotations
     axs[1].bar(counts['Retirement_Age'], counts['Extracted_Annotation_Number'], width=3)
-    #axs[1].set_xlim(xmin=0.0)
     axs[1].set_title("Original Annotations")
 
     # Set axis labels
@@ -87,8 +83,7 @@ def annotation_count(retirement_dir, output_dir, image_dir, threshold):
     plt.tight_layout()
 
     # Save the plot
-    plt.show()
-    plt.savefig(f"{output_dir}/annotation_count_comparison.jpg", bbox_inches='tight')
+    plt.savefig(f"{output_dir}\\annotation_count_comparison.jpg", bbox_inches='tight')
     plt.close()
 
 
@@ -129,6 +124,64 @@ def group_annotations(reduced_annotations, extracted_annotations, output_dir, im
     return metrics_df
 
 
+def metric_comparison(retirement_dir, output_dir, image_dir):
+
+    # Initialize dataframe
+    retirement_metrics = pd.DataFrame(columns=['Retirement_Age', 'Number_of_Images',
+                                               'Average_Annotations', 'Average_IoU', 'mAP'])
+
+    for dir in os.listdir(retirement_dir):
+
+        if dir.startswith("Retirement"):
+
+            age = int(dir.split("_", 1)[1])
+
+            dir = f"{retirement_dir}\\{dir}"
+
+            image_info = [file for file in os.listdir(dir) if file.startswith("image")][0]
+
+            csv_path = f"{dir}\\{image_info}"
+
+            image_info = pd.read_csv(csv_path)
+
+            image_number = len(image_info)
+
+            average_annotation_num = image_info['Number_of_Annotations'].mean()
+
+            average_iou = image_info['Average_IoU'].mean()
+
+            map = image_info['Mean_Average_Precision'].mean()
+
+            new_row = {'Retirement_Age': age, 'Number_of_Images': image_number,
+                       'Average Number of Annotations': average_annotation_num, 'Average IoU': average_iou, 'mAP': map}
+
+            retirement_metrics = retirement_metrics._append(new_row, ignore_index=True)
+        else:
+            continue
+
+    print(retirement_metrics)
+
+    retirement_metrics.sort_values(by='Retirement_Age')
+
+    y_values = ['Average Number of Annotations', 'Average IoU', 'mAP']
+
+    for y in y_values:
+
+        # Initialize the plot
+        plt.figure(figsize=(20, 10))
+
+        # Plot the left subplot for reduced annotations
+        plt.bar(retirement_metrics['Retirement_Age'], retirement_metrics[y], width=3)
+
+        # Set axis labels
+        plt.xlabel("Retirement Age")
+        plt.ylabel(f"{y} per Image")
+
+        plt.tight_layout()
+
+        # Save the plot
+        plt.savefig(f"{output_dir}\\{y}.jpg", bbox_inches='tight')
+        plt.close()
 
 # -----------------------------------------------------------------------------
 # Main Function
@@ -142,11 +195,11 @@ def main():
     parser = argparse.ArgumentParser(description="Determine the minimum retirement age for images in Zooniverse")
 
     parser.add_argument("--retirement_dir", type=str,
-                        default="./Retirement",
+                        default="./Retirement_Analysis",
                         help="The directory comparing retirement ages to compare")
 
     parser.add_argument("--output_dir", type=str,
-                        default="./Retirement",
+                        default="./Retirement_Analysis",
                         help="Output directory")
 
     parser.add_argument("--image_dir", type=str,
@@ -161,14 +214,15 @@ def main():
 
     # Parse out arguments
     retirement_dir = args.retirement_dir
-    #output_dir = args.output_dir
+    output_dir = args.output_dir
     image_dir = args.image_dir
-    output_dir = retirement_dir
     iou_threshold = args.iou_threshold
 
     try:
 
-        annotation_count(retirement_dir, output_dir, image_dir, iou_threshold)
+        #annotation_count(retirement_dir, output_dir, image_dir, iou_threshold)
+
+        metric_comparison(retirement_dir, output_dir, image_dir)
 
         print("Done.")
 
