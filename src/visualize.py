@@ -15,7 +15,7 @@ from sklearn.metrics import auc
 from reduce_annotations import get_image, remove_single_clusters
 
 
-def group_annotations(pre, post, image_dir, output_dir, user, threshold):
+def group_annotations(pre, post, image_dir, output_dir, user, threshold, retirement_age):
     """
     This function groups annotations together by subject ID for the original annotations and
     the reduced annotations. It also calls other functions to visualize reductions and accuracy of annotations.
@@ -60,7 +60,7 @@ def group_annotations(pre, post, image_dir, output_dir, user, threshold):
             no_singles = remove_single_clusters(subject_id_df)
 
             if not user:
-                metrics_df = create_image_row(no_singles, subject_id, metrics_df, image_path, image_name, threshold)
+                metrics_df = create_image_row(no_singles, subject_id, metrics_df, image_path, image_name, threshold, retirement_age)
 
             # Compare original annotations to reduction
             compare_pre_post(subject_id_df, post_subject_id, image_path, output_dir, image_name, user)
@@ -437,7 +437,7 @@ def user_information(reduced, original, user, image_dir, output_dir, user_df, th
     reduced_subset = reduced[reduced['Subject ID'].isin(subject_ids)]
 
     # Run through the images for the user
-    total_duration, images_df = group_annotations(user_subset, reduced_subset, image_dir, output_dir, True, threshold)
+    total_duration, images_df = group_annotations(user_subset, reduced_subset, image_dir, output_dir, True, threshold, retirement_age)
 
     # Get rid of the single clusters
     user_subset = remove_single_clusters(user_subset)
@@ -487,7 +487,7 @@ def user_information(reduced, original, user, image_dir, output_dir, user_df, th
     plt.close()
 
 
-def create_image_row(df, subject_id, images_df, image_path, image_name, threshold):
+def create_image_row(df, subject_id, images_df, image_path, image_name, threshold, retirement_age):
     """
     This function creates a new dataframe row with metrics on a specific image/Subject ID.
 
@@ -511,7 +511,7 @@ def create_image_row(df, subject_id, images_df, image_path, image_name, threshol
     total = len(df)
 
     # Get the mAP, recall, and precision for an image
-    ap, recall, precision = ap_for_image(df, threshold)
+    ap, recall, precision = ap_for_image(df, threshold, retirement_age)
 
     # Create new row
     new_row = {'Average_IoU': average_iou, 'Precision': precision, 'Recall': recall,
@@ -521,10 +521,57 @@ def create_image_row(df, subject_id, images_df, image_path, image_name, threshol
     # Add a new row to
     images_df = images_df._append(new_row, ignore_index=True)
 
-    return images_df
+     return images_df
 
 
-def ap_for_image(df, threshold):
+# def ap_for_image(df, threshold):
+#     """
+#     This function finds the mean average precision for an image.
+#
+#     Args:
+#         df (Pandas dataframe): A dataframe containing all annotations for non-single clusters for a specific image
+#         threshold (float): The IoU threshold value to determine mAP
+#
+#     Returns:
+#         ap (int): The mean average precision for the image
+#     """
+#
+#     # Initialize arrays
+#     precision_array = [0.0]
+#     recall_array = [0.0]
+#
+#     # Group by clusters
+#     df = df.groupby("clusters")
+#
+#     # Loop through the clusters
+#     for cluster, cluster_df in df:
+#
+#         # Get the precision and tp
+#         tp, precision, total = get_precision(cluster_df, threshold)
+#
+#         # Get the recall for an object
+#         users = cluster_df['user_name'].unique().tolist()
+#         fn = 30 - len(users)
+#         recall = tp / (tp + fn)
+#
+#         # Add to the precision and recall arrays
+#         precision_array.append(precision)
+#         recall_array.append(recall)
+#
+#     # Turn arrays into dataframe to sort
+#     ap_df = pd.DataFrame({'Precision': precision_array, 'Recall': recall_array})
+#     ap_df.sort_values(by='Recall', inplace=True)
+#
+#     # Find the mean recall for the image
+#     recall_mean = ap_df['Recall'].mean()
+#     precision_mean = ap_df['Precision'].mean()
+#
+#     # Find the mean average precision for the image
+#     ap = auc(ap_df['Recall'], ap_df['Precision'])
+#
+#     return ap, recall_mean, precision_mean
+
+def ap_for_image(df, threshold, retirement_age):
     """
     This function finds the mean average precision for an image.
 
@@ -541,18 +588,25 @@ def ap_for_image(df, threshold):
     recall_array = [0.0]
 
     # Group by clusters
-    df = df.groupby("clusters")
+    df = df.groupby("label")
 
     # Loop through the clusters
-    for cluster, cluster_df in df:
+    for class_name, class_name_df in df:
 
         # Get the precision and tp
-        tp, precision, total = get_precision(cluster_df, threshold)
+        tp, precision, total = get_precision(class_name_df, threshold)
+
+        true_class = class_name_df[class_name_df['correct_label'] == "Y"]
+
+        num_true_objects = len(true_class['clusters'].unique().tolist())
 
         # Get the recall for an object
-        users = cluster_df['user_name'].unique().tolist()
-        fn = 30 - len(users)
-        recall = tp / (tp + fn)
+        fn = (retirement_age * num_true_objects) - len(true_class)
+
+        if (tp + fn) == 0:
+            recall = 0
+        else:
+            recall = tp / (tp + fn)
 
         # Add to the precision and recall arrays
         precision_array.append(precision)
@@ -570,6 +624,70 @@ def ap_for_image(df, threshold):
     ap = auc(ap_df['Recall'], ap_df['Precision'])
 
     return ap, recall_mean, precision_mean
+
+
+# def ap_for_user(user_df, reduced_df, threshold):
+#     """
+#     This function finds the mean average precision for a user.
+#
+#     Args:
+#         user_df (Pandas dataframe): A dataframe containing all annotations for non-single clusters for a specific user
+#         reduced_df (Pandas dataframe): The dataframe containing the reduced annotations
+#         threshold (float): The IoU threshold value to determine mAP
+#
+#     Returns:
+#         ap (int): The mean average precision for the image
+#         """
+#
+#     # Initialize arrays
+#     precision_array = [0.0]
+#     recall_array = [0.0]
+#
+#     # Make the subject ID's integers
+#     user_df['Subject ID'] = user_df['Subject ID'].astype(int)
+#     reduced_df['Subject ID'] = reduced_df['Subject ID'].astype(int)
+#
+#     # Group both dataframes by subject ID
+#     user_df = user_df.groupby("Subject ID")
+#     reduced_groups = reduced_df.groupby("Subject ID")
+#
+#     # Loop through the images for a user
+#     for subject_id, subject_id_df in user_df:
+#
+#         # Get the reduced annotations for the subject ID
+#         if (reduced_df['Subject ID'] == subject_id).any():
+#             reduced_subject_id = reduced_groups.get_group(subject_id)
+#
+#             # Get the precision
+#             tp, precision, total = get_precision(subject_id_df, threshold)
+#
+#             # Get number of object detections for user
+#             num_objects_found = len(subject_id_df['clusters'].unique().tolist())
+#
+#             # Get the false negatives
+#             if len(reduced_subject_id) <= num_objects_found:
+#                 fn = 0
+#             else:
+#                 fn = len(reduced_subject_id) - num_objects_found
+#
+#             # Get the recall
+#             if tp == 0:
+#                 recall = 0
+#             else:
+#                 recall = tp / (tp + fn)
+#
+#             # Add to arrays
+#             precision_array.append(precision)
+#             recall_array.append(recall)
+#         else:
+#             continue
+#
+#     # Sort arrays and find the mean average precision
+#     ap_df = pd.DataFrame({'Precision': precision_array, 'Recall': recall_array})
+#     ap_df.sort_values(by='Recall', inplace=True)
+#     ap = auc(ap_df['Recall'], ap_df['Precision'])
+#
+#     return ap
 
 
 def ap_for_user(user_df, reduced_df, threshold):
@@ -593,40 +711,56 @@ def ap_for_user(user_df, reduced_df, threshold):
     user_df['Subject ID'] = user_df['Subject ID'].astype(int)
     reduced_df['Subject ID'] = reduced_df['Subject ID'].astype(int)
 
-    # Group both dataframes by subject ID
-    user_df = user_df.groupby("Subject ID")
-    reduced_groups = reduced_df.groupby("Subject ID")
+    subject_ids = user_df['Subject ID'].unique().tolist()
 
-    # Loop through the images for a user
-    for subject_id, subject_id_df in user_df:
+    # Limit reduced_df to only include images that the user has annotated
+    reduced_df = reduced_df[reduced_df['Subject ID'].isin(subject_ids)]
 
-        # Get the reduced annotations for the subject ID
-        if (reduced_df['Subject ID'] == subject_id).any():
-            reduced_subject_id = reduced_groups.get_group(subject_id)
+    # Group both dataframes by label
+    user_groups = user_df.groupby("label")
+    reduced_groups = reduced_df.groupby("label")
+
+    # Loop through the classes
+    for class_name, reduced_class_df in reduced_groups:
+
+        # Get the reduced annotations for the class
+        if (user_df['label'] == class_name).any():
+            user_class_df = user_groups.get_group(class_name)
 
             # Get the precision
-            tp, precision, total = get_precision(subject_id_df, threshold)
+            tp, precision, total = get_precision(user_class_df, threshold)
 
-            # Get number of object detections for user
-            num_objects_found = len(subject_id_df['clusters'].unique().tolist())
 
-            # Get the false negatives
-            if len(reduced_subject_id) <= num_objects_found:
-                fn = 0
-            else:
-                fn = len(reduced_subject_id) - num_objects_found
+            # Group user_class_df by subject ID
+            subject_ids = user_class_df.groupby("Subject ID")
 
-            # Get the recall
-            if tp == 0:
-                recall = 0
-            else:
-                recall = tp / (tp + fn)
+            num_objects_found = 0
 
-            # Add to arrays
-            precision_array.append(precision)
-            recall_array.append(recall)
+            for subject_id, subject_id_df in subject_ids:
+                num_objects_found += len(subject_id_df['clusters'].unique().tolist())
+
         else:
-            continue
+            num_objects_found = 0
+            tp = 0
+            precision = 0
+
+        # Get the false negatives
+        if len(reduced_class_df) <= num_objects_found:
+            fn = 0
+        else:
+            fn = len(reduced_class_df) - num_objects_found
+
+        # Get the recall
+        if tp == 0:
+            recall = 0
+        else:
+            recall = tp / (tp + fn)
+
+        # Add to arrays
+        precision_array.append(precision)
+        recall_array.append(recall)
+
+        print(class_name, precision, recall)
 
     # Sort arrays and find the mean average precision
     ap_df = pd.DataFrame({'Precision': precision_array, 'Recall': recall_array})
@@ -634,7 +768,6 @@ def ap_for_user(user_df, reduced_df, threshold):
     ap = auc(ap_df['Recall'], ap_df['Precision'])
 
     return ap
-
 
 def get_precision(df, threshold):
     """
@@ -816,6 +949,10 @@ def main():
                         default=0.6,
                         help="The IoU threshold to be taken into account for mAP")
 
+    parser.add_argument("--retirement_age", type=int,
+                        default=30,
+                        help="The retirement age for an image")
+
     args = parser.parse_args()
 
     # Parse out arguments
@@ -826,6 +963,7 @@ def main():
     num_users = args.num_users
     num_images = args.num_images
     iou_threshold = args.iou_threshold
+    retirement_age = args.retirement_age
 
     # Turn both csv files into pandas dataframes
     pre = pd.read_csv(extracted_csv)
@@ -842,15 +980,15 @@ def main():
     try:
 
         # Creates a dataframe for all users
-        user_df = user_average(pre, post, iou_threshold)
+        #user_df = user_average(pre, post, iou_threshold)
 
         if user_names is None and num_users is None:
-            total_duration, images_df = group_annotations(pre, post, image_dir, output_dir, False, iou_threshold)
+            total_duration, images_df = group_annotations(pre, post, image_dir, output_dir, False, iou_threshold, retirement_age)
 
             find_difficult_images(images_df, pre, output_dir, num_images)
 
-            plot_rankings(user_df, output_dir)
-            plot_point_graphs(user_df, images_df, output_dir)
+            #plot_rankings(user_df, output_dir)
+           # plot_point_graphs(user_df, images_df, output_dir)
 
         else:
             output_dir = f"{output_dir}\\Users"
