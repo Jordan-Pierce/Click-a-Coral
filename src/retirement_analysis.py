@@ -1,68 +1,78 @@
 import os
-import random
 import argparse
-
 import traceback
-import numpy as np
+
 import pandas as pd
-from datetime import datetime as dt
-
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-import seaborn as sns
-import matplotlib.patches as patches
 
-from sklearn.metrics import auc
-from reduce_annotations import get_image, remove_single_clusters
 from visualize import create_image_row
 from reduce_annotations import save_to_csv, get_now
+from reduce_annotations import get_image, remove_single_clusters
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Functions
 # ----------------------------------------------------------------------------------------------------------------------
 
 
-def annotation_count(retirement_dir, output_dir, image_dir, threshold):
+def annotation_count(retirement_dir, output_dir, image_dir, iou_threshold):
+    """
+    This function compares the number of original and reduced annotations at different retirement ages
+
+    Args:
+        retirement_dir (str): Path to a retirement directory containing reduced annotations and original annotations
+        at different retirement ages
+        output_dir (str): Path to where the results should be outputted
+        image_dir (str): Path to the image directory
+        iou_threshold (float): The IoU threshold that should be considered for mAP
+    """
 
     # Initialize dataframe
     counts = pd.DataFrame(columns=['Retirement_Age', 'Reduced_Annotation_Number', 'Extracted_Annotation_Number'])
 
-    for dir in os.listdir(retirement_dir):
+    # Run through the retirement directory
+    for directory in os.listdir(retirement_dir):
 
-        age = int(dir.split("_", 1)[1])
+        # Makes sure the nested folder is a retirement folder
+        if directory.startswith("Retirement"):
 
-        dir = f"{retirement_dir}\\{dir}\\Reduced"
+            # Gets the retirement age
+            age = int(directory.split("_", 1)[1])
 
-        reduced = [file for file in os.listdir(dir) if file.startswith("reduced")][0]
+            directory = f"{retirement_dir}\\{directory}\\Reduced"
 
-        extracted = [file for file in os.listdir(dir) if file.startswith("extracted")][0]
+            # Finds the reduced and original annotation csv files
+            reduced = [file for file in os.listdir(directory) if file.startswith("reduced")][0]
+            extracted = [file for file in os.listdir(directory) if file.startswith("extracted")][0]
 
-        reduced = pd.read_csv(f"{dir}\\{reduced}")
-        extracted = pd.read_csv(f"{dir}\\{extracted}")
+            # Turns the csv into a dataframe
+            reduced = pd.read_csv(f"{directory}\\{reduced}")
+            extracted = pd.read_csv(f"{directory}\\{extracted}")
 
-        image_df = group_annotations(reduced, extracted, dir, image_dir, threshold)
+            # Gets the image dataframe
+            image_df = get_image_df(reduced, extracted, image_dir, iou_threshold, age)
 
-        print(image_df)
+            # Create output CSV file for reduced annotations
+            output_csv = f"{output_dir}\\Retirement_{age}\\image_info"
 
-        # Create output CSV file for reduced annotations
-        output_csv = f"{output_dir}\\Retirement_{age}\\image_info"
+            # Get the timestamp
+            timestamp = get_now()
 
-        # Get the timestamp
-        timestamp = get_now()
+            # Save the csv
+            save_to_csv(output_csv, image_df, False, timestamp)
 
-        save_to_csv(output_csv, image_df, False, timestamp)
+            # Get the number of reduced and original annotations
+            reduced_number = len(reduced)
+            extracted_number = len(extracted)
 
-        reduced_number = len(reduced)
-        extracted_number = len(extracted)
+            # Add to dataframe
+            new_row = {'Retirement_Age': age, 'Reduced_Annotation_Number': reduced_number,
+                       'Extracted_Annotation_Number': extracted_number}
+            counts = counts._append(new_row, ignore_index=True)
 
-        # Add to dataframe
-        new_row = {'Retirement_Age': age, 'Reduced_Annotation_Number': reduced_number,
-                   'Extracted_Annotation_Number': extracted_number}
+        else:
+            continue
 
-        counts = counts._append(new_row, ignore_index=True)
-
-    print(counts)
-
+    # Sort by retirement age
     counts.sort_values(by='Retirement_Age')
 
     # Initialize the plot
@@ -87,7 +97,21 @@ def annotation_count(retirement_dir, output_dir, image_dir, threshold):
     plt.close()
 
 
-def group_annotations(reduced_annotations, extracted_annotations, output_dir, image_dir, threshold):
+def get_image_df(reduced_annotations, extracted_annotations, image_dir, iou_threshold, retirement_age):
+    """
+    This function gets an image dataframe containing information about the image mAP, IoU, etc
+
+    Args:
+        reduced_annotations (Pandas dataframe): A reduced annotation dataframe
+        extracted_annotations (Pandas dataframe): The extracted original annotation dataframe
+        image_dir (str): The path to the image directory
+        iou_threshold (float): The IoU threshold to be used for calculating mAP
+        retirement_age (int): The retirement age of the dataframe
+        
+    Returns:
+        metrics_df (Pandas dataframe): A dataframe giving metric information for the images present in the annotated 
+        dataframe
+    """
 
     # Make the subject ID's integers
     extracted_annotations['Subject ID'] = extracted_annotations['Subject ID'].astype(int)
@@ -95,7 +119,6 @@ def group_annotations(reduced_annotations, extracted_annotations, output_dir, im
 
     # Group both dataframes by subject ID
     extracted_groups = extracted_annotations.groupby("Subject ID")
-    reduced_groups = reduced_annotations.groupby("Subject ID")
 
     # Initialize metrics dataframe
     metrics_df = pd.DataFrame(columns=['Subject ID', 'Average_IoU', 'Precision',
@@ -112,59 +135,75 @@ def group_annotations(reduced_annotations, extracted_annotations, output_dir, im
 
         # Get the reduced annotations for the subject ID
         if (reduced_annotations['Subject ID'] == subject_id).any():
-            reduced_subject_id = reduced_groups.get_group(subject_id)
 
             # Get new dataframe
             no_singles = remove_single_clusters(subject_id_df)
 
-            metrics_df = create_image_row(no_singles, subject_id, metrics_df, image_path, image_name, threshold)
+            metrics_df = create_image_row(no_singles, subject_id, metrics_df, image_path, 
+                                          image_name, iou_threshold, retirement_age)
         else:
             continue
 
     return metrics_df
 
 
-def metric_comparison(retirement_dir, output_dir, image_dir):
+def metric_comparison(retirement_dir, output_dir):
+    """
+    This function plots and compares the average number of annotations, IoU, and mAP for different retirement ages
+    
+    Args:
+        retirement_dir (str): Path to the retirement directory
+        output_dir (str): Path to the output directory where the plots should be saved
+    """
 
     # Initialize dataframe
     retirement_metrics = pd.DataFrame(columns=['Retirement_Age', 'Number_of_Images',
                                                'Average_Annotations', 'Average_IoU', 'mAP'])
 
-    for dir in os.listdir(retirement_dir):
+    # Loop through the retirement folders
+    for directory in os.listdir(retirement_dir):
 
-        if dir.startswith("Retirement"):
+        # Check that folder starts with retirement
+        if directory.startswith("Retirement"):
 
-            age = int(dir.split("_", 1)[1])
+            # Get the retirement age
+            age = int(directory.split("_", 1)[1])
 
-            dir = f"{retirement_dir}\\{dir}"
+            directory = f"{retirement_dir}\\{directory}"
 
-            image_info = [file for file in os.listdir(dir) if file.startswith("image")][0]
+            # Get the associated image info csv file
+            image_info = [file for file in os.listdir(directory) if file.startswith("image")][0]
 
-            csv_path = f"{dir}\\{image_info}"
-
+            # Change the csv into a dataframe 
+            csv_path = f"{directory}\\{image_info}"
             image_info = pd.read_csv(csv_path)
 
+            # Get the number of images
             image_number = len(image_info)
 
+            # Get the average number of annotations per image
             average_annotation_num = image_info['Number_of_Annotations'].mean()
 
+            # Get the average IoU for all images
             average_iou = image_info['Average_IoU'].mean()
 
+            # Get the mAP of all the images
             map = image_info['Mean_Average_Precision'].mean()
 
+            # Add information to retirement metrics dataframe
             new_row = {'Retirement_Age': age, 'Number_of_Images': image_number,
                        'Average Number of Annotations': average_annotation_num, 'Average IoU': average_iou, 'mAP': map}
-
             retirement_metrics = retirement_metrics._append(new_row, ignore_index=True)
         else:
             continue
 
-    print(retirement_metrics)
-
+    # Sort by retirement age
     retirement_metrics.sort_values(by='Retirement_Age')
 
+    # Make a list of what the y-axis should be
     y_values = ['Average Number of Annotations', 'Average IoU', 'mAP']
 
+    # Make the plots
     for y in y_values:
 
         # Initialize the plot
@@ -182,6 +221,7 @@ def metric_comparison(retirement_dir, output_dir, image_dir):
         # Save the plot
         plt.savefig(f"{output_dir}\\{y}.jpg", bbox_inches='tight')
         plt.close()
+
 
 # -----------------------------------------------------------------------------
 # Main Function
@@ -220,9 +260,9 @@ def main():
 
     try:
 
-        #annotation_count(retirement_dir, output_dir, image_dir, iou_threshold)
+        annotation_count(retirement_dir, output_dir, image_dir, iou_threshold)
 
-        metric_comparison(retirement_dir, output_dir, image_dir)
+        metric_comparison(retirement_dir, output_dir)
 
         print("Done.")
 
