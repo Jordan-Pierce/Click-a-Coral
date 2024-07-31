@@ -19,3 +19,5 @@ autodistill_grounding_dino==0.1.3
 torch~=2.0.0+cu118
 tqdm~=4.66.4
 torchvision~=0.15.1+cu118
+pillow
+ultralytics

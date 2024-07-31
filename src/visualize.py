@@ -5,6 +5,7 @@ import argparse
 import traceback
 import numpy as np
 import pandas as pd
+import statistics
 from datetime import datetime as dt
 
 import matplotlib as mpl
@@ -15,7 +16,7 @@ from sklearn.metrics import auc
 from reduce_annotations import get_image, remove_single_clusters
 
 
-def group_annotations(pre, post, image_dir, output_dir, user, threshold):
+def group_annotations(pre, post, image_dir, output_dir, user, threshold, retirement_age):
     """
     This function groups annotations together by subject ID for the original annotations and
     the reduced annotations. It also calls other functions to visualize reductions and accuracy of annotations.
@@ -27,6 +28,7 @@ def group_annotations(pre, post, image_dir, output_dir, user, threshold):
          output_dir (str): The filepath to the output directory
          user (bool): Whether a user has been provided as an argument
          threshold (float): The IoU threshold value to determine mAP
+         retirement_age (int): The retirement age of an image
     """
     # Make the subject ID's integers
     pre['Subject ID'] = pre['Subject ID'].astype(int)
@@ -60,7 +62,8 @@ def group_annotations(pre, post, image_dir, output_dir, user, threshold):
             no_singles = remove_single_clusters(subject_id_df)
 
             if not user:
-                metrics_df = create_image_row(no_singles, subject_id, metrics_df, image_path, image_name, threshold)
+                metrics_df = create_image_row(no_singles, subject_id, metrics_df,
+                                              image_path, image_name, threshold, retirement_age)
 
             # Compare original annotations to reduction
             compare_pre_post(subject_id_df, post_subject_id, image_path, output_dir, image_name, user)
@@ -383,7 +386,7 @@ def user_average(df, reduced_df, threshold):
     return df
 
 
-def user_information(reduced, original, user, image_dir, output_dir, user_df, threshold):
+def user_information(reduced, original, user, image_dir, output_dir, user_df, threshold, retirement_age):
     """
     This function looks at providing information regarding a specific user. It plots the same visualizations only for
     the user and creates a text file with information regarding the users status and ability.
@@ -396,6 +399,7 @@ def user_information(reduced, original, user, image_dir, output_dir, user_df, th
         output_dir (str): The filepath to the output directory
         user_df (Pandas dataframe): Dataframe containing information on all users
         threshold (float): The IoU threshold value to determine mAP
+        retirement_age (int): The retirement age of an image
     """
 
     # Finds the specific user
@@ -437,7 +441,8 @@ def user_information(reduced, original, user, image_dir, output_dir, user_df, th
     reduced_subset = reduced[reduced['Subject ID'].isin(subject_ids)]
 
     # Run through the images for the user
-    total_duration, images_df = group_annotations(user_subset, reduced_subset, image_dir, output_dir, True, threshold)
+    total_duration, images_df = group_annotations(user_subset, reduced_subset,
+                                                  image_dir, output_dir, True, threshold, retirement_age)
 
     # Get rid of the single clusters
     user_subset = remove_single_clusters(user_subset)
@@ -487,7 +492,7 @@ def user_information(reduced, original, user, image_dir, output_dir, user_df, th
     plt.close()
 
 
-def create_image_row(df, subject_id, images_df, image_path, image_name, threshold):
+def create_image_row(df, subject_id, images_df, image_path, image_name, threshold, retirement_age):
     """
     This function creates a new dataframe row with metrics on a specific image/Subject ID.
 
@@ -498,6 +503,7 @@ def create_image_row(df, subject_id, images_df, image_path, image_name, threshol
         image_path (str): Filepath to the image
         image_name (str): What the image should be called
         threshold (float): The IoU threshold value to determine mAP
+        retirement_age (int): The retirement age of an image
 
     Returns:
         images_df (Pandas dataframe): The image dataframe with an additional row containing information on the image
@@ -511,7 +517,7 @@ def create_image_row(df, subject_id, images_df, image_path, image_name, threshol
     total = len(df)
 
     # Get the mAP, recall, and precision for an image
-    ap, recall, precision = ap_for_image(df, threshold)
+    ap, recall, precision = ap_for_image(df, threshold, retirement_age)
 
     # Create new row
     new_row = {'Average_IoU': average_iou, 'Precision': precision, 'Recall': recall,
@@ -524,52 +530,67 @@ def create_image_row(df, subject_id, images_df, image_path, image_name, threshol
     return images_df
 
 
-def ap_for_image(df, threshold):
+def ap_for_image(df, threshold, retirement_age):
     """
     This function finds the mean average precision for an image.
 
     Args:
         df (Pandas dataframe): A dataframe containing all annotations for non-single clusters for a specific image
         threshold (float): The IoU threshold value to determine mAP
+        retirement_age (int): The retirement age
 
     Returns:
         ap (int): The mean average precision for the image
     """
 
-    # Initialize arrays
-    precision_array = [0.0]
-    recall_array = [0.0]
+    ap_df = pd.DataFrame(columns=['class', 'precision', 'recall'])
 
     # Group by clusters
     df = df.groupby("clusters")
 
-    # Loop through the clusters
     for cluster, cluster_df in df:
+
+        true_class_df = cluster_df[cluster_df['correct_label'] == "Y"]
+
+        true_class = true_class_df.iloc[0]['label']
+
+        base_row = {'class': true_class, 'precision': 0.0, 'recall': 0.0}
+        ap_df = ap_df._append(base_row, ignore_index=True)
 
         # Get the precision and tp
         tp, precision, total = get_precision(cluster_df, threshold)
 
         # Get the recall for an object
-        users = cluster_df['user_name'].unique().tolist()
-        fn = 30 - len(users)
-        recall = tp / (tp + fn)
+        fn = retirement_age - len(true_class)
 
-        # Add to the precision and recall arrays
-        precision_array.append(precision)
-        recall_array.append(recall)
+        if (tp + fn) == 0:
+            recall = 0
+        else:
+            recall = tp / (tp + fn)
 
-    # Turn arrays into dataframe to sort
-    ap_df = pd.DataFrame({'Precision': precision_array, 'Recall': recall_array})
-    ap_df.sort_values(by='Recall', inplace=True)
+        new_row = {'class': true_class, 'precision': precision, 'recall': recall}
+
+        ap_df = ap_df._append(new_row, ignore_index=True)
+
+    ap_df.sort_values(by=['class', 'recall'], inplace=True)
 
     # Find the mean recall for the image
-    recall_mean = ap_df['Recall'].mean()
-    precision_mean = ap_df['Precision'].mean()
+    recall_mean = ap_df['recall'].mean()
+    precision_mean = ap_df['precision'].mean()
 
     # Find the mean average precision for the image
-    ap = auc(ap_df['Recall'], ap_df['Precision'])
+    ap_list = []
+    class_groups = ap_df.groupby('class')
 
-    return ap, recall_mean, precision_mean
+    for label, class_df in class_groups:
+        ap = auc(class_df['recall'], class_df['precision'])
+
+        ap_list.append(ap)
+
+    # Get the mean average precision
+    map = statistics.mean(ap_list)
+
+    return map, recall_mean, precision_mean
 
 
 def ap_for_user(user_df, reduced_df, threshold):
@@ -816,6 +837,10 @@ def main():
                         default=0.6,
                         help="The IoU threshold to be taken into account for mAP")
 
+    parser.add_argument("--retirement_age", type=int,
+                        default=30,
+                        help="The retirement age for an image")
+
     args = parser.parse_args()
 
     # Parse out arguments
@@ -826,6 +851,7 @@ def main():
     num_users = args.num_users
     num_images = args.num_images
     iou_threshold = args.iou_threshold
+    retirement_age = args.retirement_age
 
     # Turn both csv files into pandas dataframes
     pre = pd.read_csv(extracted_csv)
@@ -845,7 +871,8 @@ def main():
         user_df = user_average(pre, post, iou_threshold)
 
         if user_names is None and num_users is None:
-            total_duration, images_df = group_annotations(pre, post, image_dir, output_dir, False, iou_threshold)
+            total_duration, images_df = group_annotations(pre, post, image_dir,
+                                                          output_dir, False, iou_threshold, retirement_age)
 
             find_difficult_images(images_df, pre, output_dir, num_images)
 
@@ -858,7 +885,8 @@ def main():
             if user_names is not None:
 
                 for user_name in user_names:
-                    user_information(post, pre, user_name, image_dir, output_dir, user_df, iou_threshold)
+                    user_information(post, pre, user_name, image_dir, output_dir,
+                                     user_df, iou_threshold, retirement_age)
 
             else:
                 usernames = pre['user_name'].unique().tolist()
@@ -867,7 +895,8 @@ def main():
                 user_names = random.sample(usernames, num_users)
 
                 for user_name in user_names:
-                    user_information(post, pre, user_name, image_dir, output_dir, user_df, iou_threshold)
+                    user_information(post, pre, user_name, image_dir, output_dir,
+                                     user_df, iou_threshold, retirement_age)
 
 
         print("Done.")
