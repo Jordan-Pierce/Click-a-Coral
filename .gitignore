@@ -1,7 +1,6 @@
 Data
 .idea
-Models
+Reduced
 *.pt
 src/__pycache__/
-Annotations
-classifications.csv
+*classifications.csv

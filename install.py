@@ -47,56 +47,11 @@ if osused == 'Windows':
         sys.exit(1)
 
 # ----------------------------------------------
-# CUDA Toolkit version
-# ----------------------------------------------
-try:
-    # Command for installing cuda nvcc
-    conda_command = [conda_exe, "install", "-c", f"nvidia/label/cuda-11.8.0", "cuda-nvcc", "-y"]
-
-    # Run the conda command
-    print("NOTE: Installing CUDA NVCC 11.8")
-    subprocess.run(conda_command, check=True)
-
-    # Command for installing cuda nvcc
-    conda_command = [conda_exe, "install", "-c", f"nvidia/label/cuda-11.8.0", "cuda-toolkit", "-y"]
-
-    # Run the conda command
-    print("NOTE: Installing CUDA Toolkit 11.8")
-    subprocess.run(conda_command, check=True)
-
-except Exception as e:
-    print("ERROR: Could not install CUDA Toolkit")
-    sys.exit(1)
-
-# ----------------------------------------------
-# Pytorch
-# ----------------------------------------------
-try:
-
-    torch_package = 'torch==2.0.0+cu118'
-    torchvision_package = 'torchvision==0.15.1+cu118'
-    torch_extra_argument1 = '--extra-index-url'
-    torch_extra_argument2 = 'https://download.pytorch.org/whl/cu118'
-
-    # Setting Torch, Torchvision versions
-    list_args = [sys.executable, "-m", "pip", "install", torch_package, torchvision_package]
-    if torch_extra_argument1 != "":
-        list_args.extend([torch_extra_argument1, torch_extra_argument2])
-
-    # Installing Torch, Torchvision
-    print("NOTE: Installing Torch 2.0.0")
-    subprocess.check_call(list_args)
-
-except Exception as e:
-    print("ERROR: Could not install Pytorch")
-    sys.exit(1)
-
-# ----------------------------------------------
 # Other dependencies
 # ----------------------------------------------
 install_requires = [
     'wheel',
-
+    'tqdm',
     'numpy',
     'pandas',
     'scipy',
@@ -106,9 +61,6 @@ install_requires = [
 
     'tator',
     'panoptes-client',
-
-    # Don't mess with these
-    'supervision',
 ]
 
 # Installing all the other packages

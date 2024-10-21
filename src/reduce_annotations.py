@@ -180,7 +180,7 @@ def make_clusters(annotations, epsilon, image_path, plot_clusters, output_dir, i
     array = centers.to_numpy()
 
     # Clusters using OPTICS
-    clust = OPTICS(min_samples=n, cluster_method='dbscan', eps=epsilon, min_cluster_size=None)
+    clust = OPTICS(min_samples=int(n), cluster_method='dbscan', eps=epsilon, min_cluster_size=3)
     clust.fit(array)
 
     # Saves the clustering labels
@@ -705,7 +705,7 @@ def update_annotations(pre, post):
 def main():
     parser = argparse.ArgumentParser(description="Reduce annotations for an image frame")
 
-    parser.add_argument("--csv", type=str,
+    parser.add_argument("--input_csv", type=str,
                         help="Input CSV file")
 
     parser.add_argument("--image_dir", type=str,
@@ -713,11 +713,11 @@ def main():
                         help="The image directory")
 
     parser.add_argument("--output_dir", type=str,
-                        default="./",
+                        default="./Reduced",
                         help="Output directory")
 
     parser.add_argument("--num_samples", type=int,
-                        default=None,
+                        default=10,
                         help="Number of samples to run through")
 
     parser.add_argument("--epsilon", type=float,
@@ -727,8 +727,8 @@ def main():
     parser.add_argument("--cluster_plot_flag", action="store_true",
                         help="Include if the cluster plots should be saved")
 
-    parser.add_argument("--cluster_size", type=int or float,
-                        default=0.0,
+    parser.add_argument("--cluster_size", type=int,
+                        default=3,
                         help="Determine the minimum size for a cluster")
 
     parser.add_argument("--big_box_threshold", type=float,
@@ -736,13 +736,13 @@ def main():
                         help="The percent of overlap required to consider it a 'big boxer'")
 
     parser.add_argument("--retirement_age", type=int,
-                        default=30,
+                        default=35,
                         help="The number of people who need to see the image before it is retired")
 
     args = parser.parse_args()
 
     # Parse out arguments
-    input_csv = args.csv
+    input_csv = args.input_csv
     num_samples = args.num_samples
     epsilon = args.epsilon
     cluster_plot_flag = args.cluster_plot_flag
@@ -771,8 +771,15 @@ def main():
 
 
     try:
-        group_annotations(input_csv, num_samples, image_dir, output_dir,
-                          epsilon, cluster_plot_flag, cluster_size, big_box_threshold, retirement_age)
+        group_annotations(input_csv,
+                          num_samples,
+                          image_dir,
+                          output_dir,
+                          epsilon,
+                          cluster_plot_flag,
+                          cluster_size,
+                          big_box_threshold,
+                          retirement_age)
         print("Done.")
 
     except Exception as e:

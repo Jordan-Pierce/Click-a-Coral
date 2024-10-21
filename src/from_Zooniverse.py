@@ -9,8 +9,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-#from panoptes_aggregation.csv_utils import unjson_dataframe
-
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Functions
@@ -118,7 +116,7 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
     output_csv = f"{label_dir}/extracted_data.csv"
 
     # Read the file
-    df = pd.read_csv(input_csv)
+    df = pd.read_csv(input_csv, low_memory=False)
     # Filter by workflow id and version
     df = df[df['workflow_id'] == workflow_id]
     df = df[df['workflow_version'] == version]
@@ -130,7 +128,7 @@ def clean_csv_file(input_csv, label_dir,  workflow_id, version):
     truncate_counter = 0
     point_counter = 0
 
-    for i, r in tqdm(df.iterrows()):
+    for i, r in tqdm(df.iterrows(), total=len(df), desc="Cleaning Data"):
 
         # Get the image metadata
         subject_data = json.loads(r['subject_data'])
@@ -330,7 +328,7 @@ def main():
                         help="Workflow ID.")
 
     parser.add_argument("--version", type=float,
-                        default=16.18,
+                        default=48.28,
                         help="Version.")
 
     parser.add_argument("--input_csv", type=str,
@@ -341,11 +339,11 @@ def main():
                         help="Path to the image directory.")
 
     parser.add_argument("--label_dir", type=str,
-                        default="./Annotations",
+                        default="./Extracted",
                         help="Path to the label directory.")
 
     parser.add_argument("--num_samples", type=int,
-                        default=1,
+                        default=100,
                         help="Number of samples to plot.")
 
     parser.add_argument("--legend_flag", action="store_true",
