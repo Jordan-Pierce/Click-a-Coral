@@ -208,6 +208,11 @@ def upload_to_zooniverse(args):
             media_name = media.name
             media_dir = f"{output_dir}/{media_id}"
             frame_dir = f"{media_dir}/frames"
+
+            if os.path.exists(frame_dir):
+                raise Exception(f"ERROR: Frames for media {media_id} already exist in {frame_dir}; "
+                                f"this media has already been uploaded.")
+
             os.makedirs(frame_dir)
             print(f"NOTE: Media ID {media_id} corresponds to {media_name}")
 

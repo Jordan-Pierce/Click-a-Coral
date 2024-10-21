@@ -16,3 +16,17 @@ conda activate cac
 python install.py
 
 ```
+
+```python
+# Set up the environment variables
+setx ZOONIVERSE_USERNAME "your_username"
+setx ZOONIVERSE_PASSWORD "your_password"
+```
+
+### Usage
+
+```python   
+# cmd
+
+python src/to_Zooniverse.py --media_ids 123456789 --upload
+```
