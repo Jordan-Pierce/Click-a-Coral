@@ -31,6 +31,9 @@ def filter_frames_by_navigation(nav_data, dist_thresh=1.5):
     # Loop through each of the frames' navigational attribute data
     for fidx, frame in enumerate(nav_data):
 
+        if 'Eastings_Raw' not in frame.attributes or 'Northings_Raw' not in frame.attributes:
+            continue
+
         # Get the current easting and northing
         curr_east = float(frame.attributes['Eastings_Raw'])
         curr_north = float(frame.attributes['Northings_Raw'])
