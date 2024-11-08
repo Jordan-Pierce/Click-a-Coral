@@ -180,9 +180,10 @@ def upload_to_zooniverse(args):
         raise Exception(f"ERROR: Could not login to Panoptes for {args.username}")
 
     try:
-        # Get access to the Zooniverse project given the provided credentials
-        project = panoptes_client.Project.find(id=args.zoon_project_id)
-        print(f"NOTE: Connected to Zooniverse project '{project.title}' successfully")
+        if args.upload:
+            # Get access to the Zooniverse project given the provided credentials
+            project = panoptes_client.Project.find(id=args.zoon_project_id)
+            print(f"NOTE: Connected to Zooniverse project '{project.title}' successfully")
     except:
         raise Exception(f"ERROR: Could not access project {args.zoon_project_id}")
 
