@@ -7,7 +7,6 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
 import tator
-import panoptes_client
 
 import math
 import pandas as pd
@@ -170,9 +169,13 @@ def upload_to_zooniverse(args):
     os.makedirs(output_dir, exist_ok=True)
 
     try:
-        # Login to panoptes using username and password
-        panoptes_client.Panoptes.connect(username=args.username, password=args.password)
-        print(f"NOTE: Authentication to Zooniverse successful for {args.username}")
+        if args.upload:
+            # Import only if uploading
+            import panoptes_client
+
+            # Login to panoptes using username and password
+            panoptes_client.Panoptes.connect(username=args.username, password=args.password)
+            print(f"NOTE: Authentication to Zooniverse successful for {args.username}")
     except:
         raise Exception(f"ERROR: Could not login to Panoptes for {args.username}")
 
