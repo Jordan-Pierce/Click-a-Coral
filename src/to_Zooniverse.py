@@ -269,7 +269,9 @@ def upload_to_zooniverse(args):
             set_active = args.set_active
 
             dataframe = upload(panoptes_client, project, media, dataframe, set_active)
-            dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
+
+        # Save the dataframe locally
+        dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
 
 
 # -----------------------------------------------------------------------------
