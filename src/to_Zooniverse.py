@@ -173,103 +173,116 @@ def upload_to_zooniverse(args):
         # Login to panoptes using username and password
         panoptes_client.Panoptes.connect(username=args.username, password=args.password)
         print(f"NOTE: Authentication to Zooniverse successful for {args.username}")
-    except:
-        raise Exception(f"ERROR: Could not login to Panoptes for {args.username}")
+    except Exception as e:
+        raise Exception(f"ERROR: Could not login to Panoptes for {args.username}\n{e}")
 
     try:
         # Get access to the Zooniverse project given the provided credentials
         project = panoptes_client.Project.find(id=args.zoon_project_id)
         print(f"NOTE: Connected to Zooniverse project '{project.title}' successfully")
-    except:
-        raise Exception(f"ERROR: Could not access project {args.zoon_project_id}")
+    except Exception as e:
+        raise Exception(f"ERROR: Could not access project {args.zoon_project_id}.\n{e}")
 
     try:
         # Get the TATOR api given the provided token
         api = tator.get_api(host='https://cloud.tator.io', token=args.api_token)
         # Get the correct type of localization for the project (bounding box, attributes)
         tator_project_id = args.tator_project_id
-        project_name = api.get_project(id=tator_project_id).name
         state_type_id = 288  # State Type (ROV)
-        state_name = api.get_state_type(state_type_id).name
         print(f"NOTE: Authentication to TATOR successful for {api.whoami().username}")
     except Exception as e:
         raise Exception(f"ERROR: Could not obtain needed information from TATOR.\n{e}")
+    
+    if not args.existing_csv:
 
-    # ---------------------------
-    # Download frames from TATOR
-    # ---------------------------
+        # ---------------------------
+        # Download frames from TATOR
+        # ---------------------------
 
-    # Loop through medias
-    for media_id in args.media_ids:
+        # Loop through medias
+        for media_id in args.media_ids:
 
+            try:
+                # Media name used for output
+                media = api.get_media(media_id)
+                media_name = media.name
+                media_dir = f"{output_dir}/{media_id}"
+                frame_dir = f"{media_dir}/frames"
+
+                if os.path.exists(frame_dir):
+                    raise Exception(f"ERROR: Frames for media {media_id} already exist in {frame_dir}; "
+                                    f"this media has already been uploaded.")
+
+                os.makedirs(frame_dir)
+                print(f"NOTE: Media ID {media_id} corresponds to {media_name}")
+
+                # Get the frames that have some navigational data instead of downloading all of the frames
+                nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
+                print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
+
+                frames = filter_frames_by_navigation(nav_data, dist_thresh=args.dist_thresh)
+                print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
+
+                # Download the frames
+                print(f"NOTE: Downloading {len(frames)} frames for {media_name}")
+                with ThreadPoolExecutor() as executor:
+                    # Submit the jobs
+                    paths = [executor.submit(download_image, api, media_id, frame, frame_dir) for frame in frames]
+                    # Execute, store paths
+                    paths = [future.result() for future in tqdm(paths)]
+
+            except Exception as e:
+                raise Exception(f"ERROR: Could not finish downloading media {media_id} from TATOR.\n{e}")
+
+            # -------------------------------------
+            # Manual Removal of Low Quality Frames
+            # -------------------------------------
+            _ = input("NOTE: Remove low quality frames manually; press 'Enter' when finished.")
+            # Get the remaining high quality frames
+            paths = glob.glob(f"{frame_dir}/*.jpg")
+
+            # Dataframe for the filtered frames
+            dataframe = []
+
+            # Loop through all the filtered frames and store attribute information;
+            # this will be used when later when  downloading annotations from
+            # Zooniverse after users are done with labeling
+            for p_idx, path in enumerate(paths):
+
+                # Add to dataframe
+                dataframe.append([media_id,
+                                  media_name,
+                                  p_idx,
+                                  os.path.basename(path),
+                                  path,
+                                  media.height,
+                                  media.width])
+
+            # Output a dataframe to be used for later
+            dataframe = pd.DataFrame(dataframe, columns=['Media ID', 'Media Name',
+                                                         'Frame ID', 'Frame Name',
+                                                         'Path', 'Height', 'Width'])
+    else:
         try:
-            # Media name used for output
+            # Load the existing CSV file
+            dataframe = pd.read_csv(args.existing_csv)
+            media_id = str(dataframe['Media ID'].unique()[0])
             media = api.get_media(media_id)
             media_name = media.name
             media_dir = f"{output_dir}/{media_id}"
-            frame_dir = f"{media_dir}/frames"
-
-            if os.path.exists(frame_dir):
-                raise Exception(f"ERROR: Frames for media {media_id} already exist in {frame_dir}; "
-                                f"this media has already been uploaded.")
-
-            os.makedirs(frame_dir)
-            print(f"NOTE: Media ID {media_id} corresponds to {media_name}")
-
-            # Get the frames that have some navigational data instead of downloading all of the frames
-            nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
-            print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
-
-            frames = filter_frames_by_navigation(nav_data, dist_thresh=args.dist_thresh)
-            print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
-
-            # Download the frames
-            print(f"NOTE: Downloading {len(frames)} frames for {media_name}")
-            with ThreadPoolExecutor() as executor:
-                # Submit the jobs
-                paths = [executor.submit(download_image, api, media_id, frame, frame_dir) for frame in frames]
-                # Execute, store paths
-                paths = [future.result() for future in tqdm(paths)]
-
+            dataframe['Path'] = [f"{media_dir}/frames/{os.path.basename(p)}" for p in dataframe['Frame Name']]
+            print(f"NOTE: Loaded existing CSV file with {len(dataframe)} media")
         except Exception as e:
-            raise Exception(f"ERROR: Could not finish downloading media {media_id} from TATOR.\n{e}")
+            raise Exception(f"ERROR: Could not load existing CSV file {args.existing_csv}\n{e}")
 
-        # -------------------------------------
-        # Manual Removal of Low Quality Frames
-        # -------------------------------------
-        _ = input("NOTE: Remove low quality frames manually; press 'Enter' when finished.")
-        # Get the remaining high quality frames
-        paths = glob.glob(f"{frame_dir}/*.jpg")
+    if args.upload:
+        # ---------------------
+        # Upload to Zooniverse
+        # ---------------------
+        set_active = args.set_active
 
-        # Dataframe for the filtered frames
-        dataframe = []
-
-        # Loop through all the filtered frames and store attribute information;
-        # this will be used when later when  downloading annotations from
-        # Zooniverse after users are done with labeling
-        for p_idx, path in enumerate(paths):
-
-            # Add to dataframe
-            dataframe.append([media_id,
-                              media_name,
-                              p_idx,
-                              os.path.basename(path),
-                              path,
-                              media.height,
-                              media.width])
-
-        # Output a dataframe to be used for later
-        dataframe = pd.DataFrame(dataframe, columns=['Media ID', 'Media Name',
-                                                     'Frame ID', 'Frame Name',
-                                                     'Path', 'Height', 'Width'])
-        if args.upload:
-            # ---------------------
-            # Upload to Zooniverse
-            # ---------------------
-            set_active = args.set_active
-
-            dataframe = upload(panoptes_client, project, media, dataframe, set_active)
-            dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
+        dataframe = upload(panoptes_client, project, media, dataframe, set_active)
+        dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
 
 
 # -----------------------------------------------------------------------------
@@ -302,6 +315,9 @@ def main():
     parser.add_argument("--tator_project_id", type=int,
                         default=70,  # MDBC project
                         help="Tator Project ID")
+    
+    parser.add_argument("--existing_csv", type=str, default=None,
+                        help="Path to existing CSV file with media information")
 
     parser.add_argument("--media_ids", type=int, nargs='+',
                         help="ID for desired media(s)")
