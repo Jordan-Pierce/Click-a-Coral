@@ -1,6 +1,8 @@
-Data
 .idea
+.vscode
+Data
 Reduced
+Extracted
 *.pt
 src/__pycache__/
 *classifications.csv
