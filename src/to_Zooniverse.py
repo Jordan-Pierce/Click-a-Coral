@@ -66,10 +66,14 @@ def download_image(api, media_id, frame, frame_dir):
     # Location of file
     path = f"{frame_dir}/{str(frame)}.jpg"
 
-    # If it doesn't already exist, download, move.
-    if not os.path.exists(path):
-        temp = api.get_frame(media_id, frames=[frame])
-        shutil.move(temp, path)
+    try:
+        # If it doesn't already exist, download, move.
+        if not os.path.exists(path):
+            temp = api.get_frame(media_id, frames=[frame])
+            shutil.move(temp, path)
+    except Exception as e:
+        print(f"ERROR: Could not download frame {frame} for media {media_id}.\n{e}")
+        path = None
 
     return path
 
