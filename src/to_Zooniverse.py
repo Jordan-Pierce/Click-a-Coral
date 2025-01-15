@@ -7,7 +7,6 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
 import tator
-import panoptes_client
 
 import math
 import pandas as pd
@@ -174,20 +173,6 @@ def upload_to_zooniverse(args):
     os.makedirs(output_dir, exist_ok=True)
 
     try:
-        # Login to panoptes using username and password
-        panoptes_client.Panoptes.connect(username=args.username, password=args.password)
-        print(f"NOTE: Authentication to Zooniverse successful for {args.username}")
-    except Exception as e:
-        raise Exception(f"ERROR: Could not login to Panoptes for {args.username}\n{e}")
-
-    try:
-        # Get access to the Zooniverse project given the provided credentials
-        project = panoptes_client.Project.find(id=args.zoon_project_id)
-        print(f"NOTE: Connected to Zooniverse project '{project.title}' successfully")
-    except Exception as e:
-        raise Exception(f"ERROR: Could not access project {args.zoon_project_id}.\n{e}")
-
-    try:
         # Get the TATOR api given the provided token
         api = tator.get_api(host='https://cloud.tator.io', token=args.api_token)
         # Get the correct type of localization for the project (bounding box, attributes)
@@ -283,8 +268,23 @@ def upload_to_zooniverse(args):
         # ---------------------
         # Upload to Zooniverse
         # ---------------------
-        set_active = args.set_active
+        import panoptes_client
+        
+        try:
+            # Login to panoptes using username and password
+            panoptes_client.Panoptes.connect(username=args.username, password=args.password)
+            print(f"NOTE: Authentication to Zooniverse successful for {args.username}")
+        except Exception as e:
+            raise Exception(f"ERROR: Could not login to Panoptes for {args.username}\n{e}")
 
+        try:
+            # Get access to the Zooniverse project given the provided credentials
+            project = panoptes_client.Project.find(id=args.zoon_project_id)
+            print(f"NOTE: Connected to Zooniverse project '{project.title}' successfully")
+        except Exception as e:
+            raise Exception(f"ERROR: Could not access project {args.zoon_project_id}.\n{e}")
+        
+        set_active = args.set_active
         dataframe = upload(panoptes_client, project, media, dataframe, set_active)
         dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
 
