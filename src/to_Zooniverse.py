@@ -31,24 +31,28 @@ def filter_frames_by_navigation(nav_data, dist_thresh=1.5):
     # Loop through each of the frames' navigational attribute data
     for fidx, frame in enumerate(nav_data):
 
-        # Get the current easting and northing
-        curr_east = float(frame.attributes['Eastings_Raw'])
-        curr_north = float(frame.attributes['Northings_Raw'])
-        curr_point = (curr_east, curr_north)
+        try:
+            # Get the current easting and northing
+            curr_east = float(frame.attributes['Eastings_Raw'])
+            curr_north = float(frame.attributes['Northings_Raw'])
+            curr_point = (curr_east, curr_north)
 
-        # For the first frame, add it to the list
-        if fidx == 0:
-            frames.append(frame.frame)
-            prev_point = curr_point
-            continue
+            # For the first frame, add it to the list
+            if fidx == 0:
+                frames.append(frame.frame)
+                prev_point = curr_point
+                continue
 
-        # Calculate the distance between the current point and the previous point
-        distance = math.sqrt((curr_east - prev_point[0])**2 + (curr_north - prev_point[1])**2)
+            # Calculate the distance between the current point and the previous point
+            distance = math.sqrt((curr_east - prev_point[0])**2 + (curr_north - prev_point[1])**2)
 
-        # If the distance is greater than the threshold, add the current frame
-        if distance >= dist_thresh:
-            frames.append(frame.frame)
-            prev_point = curr_point
+            # If the distance is greater than the threshold, add the current frame
+            if distance >= dist_thresh:
+                frames.append(frame.frame)
+                prev_point = curr_point
+        
+        except Exception as e:
+            print(f"ERROR: Could not process frame {frame.frame}.\n{e}")
 
     return frames
 
@@ -183,46 +187,43 @@ def upload_to_zooniverse(args):
         raise Exception(f"ERROR: Could not obtain needed information from TATOR.\n{e}")
     
     if not args.existing_csv:
-
         # ---------------------------
         # Download frames from TATOR
         # ---------------------------
+        try:
+            # Media name used for output
+            media_id = args.media_ids
+            media = api.get_media(media_id)
+            media_name = media.name
+            media_dir = f"{output_dir}/{media_id}"
+            frame_dir = f"{media_dir}/frames"
 
-        # Loop through medias
-        for media_id in args.media_ids:
+            if os.path.exists(frame_dir):
+                raise Exception(f"ERROR: Frames for media {media_id} already exist in {frame_dir}; "
+                                f"this media has already been uploaded.")
 
-            try:
-                # Media name used for output
-                media = api.get_media(media_id)
-                media_name = media.name
-                media_dir = f"{output_dir}/{media_id}"
-                frame_dir = f"{media_dir}/frames"
+            os.makedirs(frame_dir)
+            print(f"NOTE: Media ID {media_id} corresponds to {media_name}")
 
-                if os.path.exists(frame_dir):
-                    raise Exception(f"ERROR: Frames for media {media_id} already exist in {frame_dir}; "
-                                    f"this media has already been uploaded.")
+            # Get the frames that have some navigational data instead of downloading all of the frames
+            nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
+            print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
 
-                os.makedirs(frame_dir)
-                print(f"NOTE: Media ID {media_id} corresponds to {media_name}")
+            frames = filter_frames_by_navigation(nav_data, dist_thresh=args.dist_thresh)
+            print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
 
-                # Get the frames that have some navigational data instead of downloading all of the frames
-                nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
-                print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
+            # Download the frames
+            print(f"NOTE: Downloading {len(frames)} frames for {media_name}")
+            with ThreadPoolExecutor() as executor:
+                # Submit the jobs
+                paths = [executor.submit(download_image, api, media_id, frame, frame_dir) for frame in frames]
+                # Execute, store paths
+                paths = [future.result() for future in tqdm(paths)]
 
-                frames = filter_frames_by_navigation(nav_data, dist_thresh=args.dist_thresh)
-                print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
+        except Exception as e:
+            raise Exception(f"ERROR: Could not finish downloading media {media_id} from TATOR.\n{e}")
 
-                # Download the frames
-                print(f"NOTE: Downloading {len(frames)} frames for {media_name}")
-                with ThreadPoolExecutor() as executor:
-                    # Submit the jobs
-                    paths = [executor.submit(download_image, api, media_id, frame, frame_dir) for frame in frames]
-                    # Execute, store paths
-                    paths = [future.result() for future in tqdm(paths)]
-
-            except Exception as e:
-                raise Exception(f"ERROR: Could not finish downloading media {media_id} from TATOR.\n{e}")
-
+        try:
             # -------------------------------------
             # Manual Removal of Low Quality Frames
             # -------------------------------------
@@ -247,11 +248,19 @@ def upload_to_zooniverse(args):
                                   media.height,
                                   media.width])
 
+        except Exception as e:
+            print(f"ERROR: Could not finish filtering frames for media {media_id}")
+            
+        finally:
             # Output a dataframe to be used for later
-            dataframe = pd.DataFrame(dataframe, columns=['Media ID', 'Media Name',
-                                                         'Frame ID', 'Frame Name',
-                                                         'Path', 'Height', 'Width'])
-    else:
+            dataframe = pd.DataFrame(dataframe, columns=['Media ID', 
+                                                         'Media Name',
+                                                         'Frame ID', 
+                                                         'Frame Name',
+                                                         'Path', 
+                                                         'Height', 
+                                                         'Width'])
+    if args.existing_csv:
         try:
             # Load the existing CSV file
             dataframe = pd.read_csv(args.existing_csv)
@@ -286,7 +295,9 @@ def upload_to_zooniverse(args):
         
         set_active = args.set_active
         dataframe = upload(panoptes_client, project, media, dataframe, set_active)
-        dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
+    
+    # Save the dataframe regardless of whether it was uploaded
+    dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
 
 
 # -----------------------------------------------------------------------------
@@ -323,8 +334,8 @@ def main():
     parser.add_argument("--existing_csv", type=str, default=None,
                         help="Path to existing CSV file with media information")
 
-    parser.add_argument("--media_ids", type=int, nargs='+',
-                        help="ID for desired media(s)")
+    parser.add_argument("--media_ids", type=str,
+                        help="ID for desired media")
 
     parser.add_argument("--dist_thresh", type=float,
                         default=1.5,
