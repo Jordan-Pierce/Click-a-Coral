@@ -6,3 +6,6 @@ Extracted
 *.pt
 src/__pycache__/
 *classifications.csv
+data/
+*.egg-info
+build

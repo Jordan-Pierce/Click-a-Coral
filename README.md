@@ -1,21 +1,33 @@
 # Click-a-Coral
 
-(for uploading data and downloading annotations for [`Click-a-Coral`](https://www.zooniverse.org/lab/21853))
+for uploading data and downloading annotations for [`Click-a-Coral`](https://www.zooniverse.org/lab/21853)
 
 ### Install
 
 ```python
-# First, create a venv for this repo
-conda create --name cac python=3.8 -y 
-
-# Second, clone this repo somewhere (e.g. /Documents/GitHub/)
 git clone https://github.com/Jordan-Pierce/Click-a-Coral.git
 
-# Third, install the dependencies within venv
+conda create --name cac python=3.8 -y 
 conda activate cac
-python install.py
 
+pip install uv
+uv pip install -e .
 ```
+
+#### CUDA
+
+```bash
+# cmd
+
+# Example for CUDA 11.8
+conda install nvidia/label/cuda-11.8.0::cuda-nvcc -y
+conda install nvidia/label/cuda-11.8.0::cuda-toolkit -y
+
+# Example for torch w/ CUDA 11.8
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118 --upgrade
+```
+
+### Credentials
 
 ```python
 # Set up the environment variables
