@@ -75,10 +75,10 @@ class VideoPaneler:
         if rows:
             cols = math.ceil(num_videos / rows)
             return rows, cols
-          if cols:
+        if cols:
             rows = math.ceil(num_videos / cols)
             return rows, cols
-        
+            
         # Auto-calculate optimal dimensions
         sqrt_videos = math.sqrt(num_videos)
         cols = math.ceil(sqrt_videos)
@@ -139,13 +139,18 @@ class VideoPaneler:
         if filter_parts:
             filter_complex = ';'.join(filter_parts)
             cmd.extend(['-filter_complex', filter_complex])
+            
+            # Map video output
             if final_filter != "[out]":
                 cmd.extend(['-map', final_filter])
-        
-        # Audio handling - mix audio from all inputs
-        if len(self.video_files) > 1:
-            audio_filter = f"amix=inputs={len(self.video_files)}:duration=longest"
-            cmd.extend(['-filter_complex', f"{filter_complex};{audio_filter}" if filter_parts else audio_filter])
+            else:
+                cmd.extend(['-map', '[out]'])
+            
+            # No audio output
+            cmd.extend(['-an'])
+        else:
+            # No video filtering, just copy streams
+            cmd.extend(['-c', 'copy'])
         
         # Output file
         cmd.append(self.output_file)
@@ -209,20 +214,21 @@ def main():
     parser = argparse.ArgumentParser(
         description="Create paneled videos from multiple input video files",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Create 2x2 panel from 4 videos
-  python panel_video.py video1.mp4 video2.mp4 video3.mp4 video4.mp4 -o output.mp4
-
-  # Create 3x2 panel (3 rows, 2 columns)
-  python panel_video.py *.mp4 -o output.mp4 --rows 3 --cols 2
-
-  # Scale videos to specific size before paneling
-  python panel_video.py *.mp4 -o output.mp4 --scale-width 640 --scale-height 480
-
-  # Auto-calculate grid dimensions
-  python panel_video.py video*.mp4 -o output.mp4
+        epilog=
         """
+                Examples:
+                # Create 2x2 panel from 4 videos
+                python cac/panel_video.py video1.mp4 video2.mp4 video3.mp4 video4.mp4 -o output.mp4
+
+                # Create 3x2 panel (3 rows, 2 columns)
+                python panel_video.py *.mp4 -o output.mp4 --rows 3 --cols 2
+
+                # Scale videos to specific size before paneling
+                python panel_video.py *.mp4 -o output.mp4 --scale-width 640 --scale-height 480
+
+                # Auto-calculate grid dimensions
+                python panel_video.py video*.mp4 -o output.mp4
+    """
     )
     
     parser.add_argument(
