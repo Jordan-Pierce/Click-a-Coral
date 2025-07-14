@@ -212,14 +212,12 @@ def upload_to_zooniverse(args):
         raise Exception(f"ERROR: Could not obtain needed information from TATOR.\n{e}")
     
     if not args.existing_csv:
-
         # ---------------------------
         # Download frames from TATOR
         # ---------------------------
 
         # Loop through medias
         for media_id in args.media_ids:
-
             try:
                 # Media name used for output
                 media = api.get_media(media_id)
@@ -237,17 +235,33 @@ def upload_to_zooniverse(args):
                 # Get the frames that have some navigational data instead of downloading all of the frames
                 nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
                 if len(nav_data) == 0:
-                    raise Exception(f"ERROR: No navigational data found for media {media_name} (ID: {media_id}). "
-                                    f"This media might not have navigational data.")
+                    print(f"WARNING: No navigational data found for media {media_name} (ID: {media_id}).")
                     
-                print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
-
-                frames = filter_frames_by_navigation(nav_data, dist_thresh=args.dist_thresh)
-                if len(frames) == 0:
-                    raise Exception(f"ERROR: No frames found with movement for media {media_name} (ID: {media_id}). "
-                                    f"Please check the distance threshold or the navigational data.")
+                    # Get total number of frames for this media
+                    total_frames = media.num_frames
+                    print(f"This media has {total_frames} total frames.")
                     
-                print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
+                    # Suggest a reasonable sampling rate (aim for ~200 frames)
+                    suggested_sample = max(1, int(total_frames / 200))
+                    
+                    print(f"Suggested sampling rate: every {suggested_sample} frames "
+                          f"(would give ~{total_frames//suggested_sample} frames)")
+                    print("Enter your desired sampling rate or press Ctrl+C to exit:")
+                    
+                    try:
+                        sample_every_n = int(input(f"Sample every N frames [{suggested_sample}]: ") or suggested_sample)
+                        frames = sample_frames_by_interval(total_frames, sample_every_n)
+                        print(f"Will sample {len(frames)} frames from media {media_name}")
+                    except KeyboardInterrupt:
+                        raise Exception("User canceled the operation")
+                else:
+                    print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
+                    frames = filter_frames_by_navigation(nav_data, dist_thresh=args.dist_thresh)
+                    if len(frames) == 0:
+                        raise Exception(f"ERROR: No frames found with movement for media {media_name}. "
+                                        f"Please check the distance threshold or the navigational data.")
+                    
+                    print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
 
                 # Download the frames
                 print(f"NOTE: Downloading {len(frames)} frames for {media_name}")
@@ -308,7 +322,20 @@ def upload_to_zooniverse(args):
         set_active = args.set_active
 
         dataframe = upload(panoptes_client, project, media, dataframe, set_active)
-        dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
+        
+    # Save the dataframe to a CSV file
+    dataframe.to_csv(f"{media_dir}/frames.csv", index=False)
+
+
+def sample_frames_by_interval(total_frames, sample_every_n):
+    """
+    Sample frames at regular intervals.
+    
+    :param total_frames: Total number of frames in the media
+    :param sample_every_n: Sample every Nth frame
+    :return: List of frame numbers to sample
+    """
+    return list(range(0, total_frames, sample_every_n))
 
 
 # -----------------------------------------------------------------------------
