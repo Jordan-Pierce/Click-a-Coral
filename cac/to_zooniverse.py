@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import tator
 import panoptes_client
 
+import utm
 import math
 import pandas as pd
 
@@ -30,16 +31,33 @@ def filter_frames_by_navigation(nav_data, dist_thresh=1.5):
     prev_point = None
 
     # Loop through each of the frames' navigational attribute data
-    for fidx, frame in enumerate(nav_data):
+    for fidx, frame_data in enumerate(nav_data):
 
-        # Get the current easting and northing
-        curr_east = float(frame.attributes['Eastings_Raw'])
-        curr_north = float(frame.attributes['Northings_Raw'])
+        # Get the current easting and northing using .get(), default to None
+        curr_east = frame_data.attributes.get('Eastings_Raw', None)
+        curr_north = frame_data.attributes.get('Northings_Raw', None)
+
+        # If either is None, skip this frame
+        if curr_east is None or curr_north is None:
+            # Check for latitude and longitude
+            curr_lat = frame_data.attributes.get('Latitude', None)
+            curr_lon = frame_data.attributes.get('Longitude', None)
+            if curr_lat is not None and curr_lon is not None:
+                try:
+                    utm_result = utm.from_latlon(float(curr_lat), float(curr_lon))
+                    curr_east, curr_north = utm_result[0], utm_result[1]
+                except Exception:
+                    continue
+            else:
+                continue
+
+        curr_east = float(curr_east)
+        curr_north = float(curr_north)
         curr_point = (curr_east, curr_north)
 
         # For the first frame, add it to the list
         if fidx == 0:
-            frames.append(frame.frame)
+            frames.append(frame_data.frame)
             prev_point = curr_point
             continue
 
@@ -48,7 +66,7 @@ def filter_frames_by_navigation(nav_data, dist_thresh=1.5):
 
         # If the distance is greater than the threshold, add the current frame
         if distance >= dist_thresh:
-            frames.append(frame.frame)
+            frames.append(frame_data.frame)
             prev_point = curr_point
 
     return frames
@@ -218,9 +236,17 @@ def upload_to_zooniverse(args):
 
                 # Get the frames that have some navigational data instead of downloading all of the frames
                 nav_data = api.get_state_list(project=tator_project_id, media_id=[media_id], type=state_type_id)
+                if len(nav_data) == 0:
+                    raise Exception(f"ERROR: No navigational data found for media {media_name} (ID: {media_id}). "
+                                    f"This media might not have navigational data.")
+                    
                 print(f"NOTE: Found {len(nav_data)} frames with navigational data for media {media_name}")
 
                 frames = filter_frames_by_navigation(nav_data, dist_thresh=args.dist_thresh)
+                if len(frames) == 0:
+                    raise Exception(f"ERROR: No frames found with movement for media {media_name} (ID: {media_id}). "
+                                    f"Please check the distance threshold or the navigational data.")
+                    
                 print(f"NOTE: Found {len(frames)} / {len(nav_data)} frames with movement for media {media_name}")
 
                 # Download the frames
@@ -333,7 +359,7 @@ def main():
                         help="Upload media to Zooniverse (debugging)")
 
     parser.add_argument("--output_dir", type=str,
-                        default=f'{os.path.dirname(os.path.dirname(os.path.realpath(__file__)))}/Data/Caroline',
+                        default=f'{os.path.dirname(os.path.dirname(os.path.realpath(__file__)))}/data/curated',
                         help="Path to the output directory.")
 
     args = parser.parse_args()

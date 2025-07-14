@@ -12,6 +12,7 @@ ultralytics>=3.8.100
 supervision==0.25.0
 autodistill
 roboflow
+utm
 
 tator
 panoptes-client
